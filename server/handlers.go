@@ -232,6 +232,39 @@ func createCredential(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(credential)
 }
 
+func runSecretsdump(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	var req RunSecretsdumpRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	if req.Target == "" {
+		http.Error(w, "Target is required", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "Username is required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := RunSecretsdump(teamName, req)
+	if err != nil {
+		log.Printf("Error running secretsdump: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
 func getKerberosCaches(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

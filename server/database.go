@@ -56,6 +56,7 @@ func initDB() error {
 		username TEXT NOT NULL,
 		secret_type TEXT NOT NULL,
 		secret TEXT NOT NULL,
+		rid TEXT DEFAULT '',
 		domain TEXT DEFAULT '',
 		host TEXT DEFAULT '',
 		ip TEXT DEFAULT '',
@@ -69,6 +70,9 @@ func initDB() error {
 	}
 
 	if err := ensureCredentialColumn("ip", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureCredentialColumn("rid", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -270,7 +274,7 @@ func DeleteTeamByName(name string) error {
 
 func GetCredentialsByTeamName(teamName string) ([]Credential, error) {
 	rows, err := db.Query(`
-		SELECT id, team_name, os, username, secret_type, secret, domain, host, ip, created_at
+		SELECT id, team_name, os, username, secret_type, secret, rid, domain, host, ip, created_at
 		FROM credentials
 		WHERE team_name = ?
 		ORDER BY created_at DESC, id DESC
@@ -290,6 +294,7 @@ func GetCredentialsByTeamName(teamName string) ([]Credential, error) {
 			&credential.Username,
 			&credential.SecretType,
 			&credential.Secret,
+			&credential.RID,
 			&credential.Domain,
 			&credential.Host,
 			&credential.IP,
@@ -313,9 +318,9 @@ func CreateCredential(teamName string, req CreateCredentialRequest) (*Credential
 	}
 
 	result, err := db.Exec(`
-		INSERT INTO credentials (team_name, os, username, secret_type, secret, domain, host, ip)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, teamName, req.OS, req.Username, req.SecretType, req.Secret, req.Domain, req.Host, req.IP)
+		INSERT INTO credentials (team_name, os, username, secret_type, secret, rid, domain, host, ip)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, teamName, req.OS, req.Username, req.SecretType, req.Secret, req.RID, req.Domain, req.Host, req.IP)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +332,7 @@ func CreateCredential(teamName string, req CreateCredentialRequest) (*Credential
 
 	var credential Credential
 	err = db.QueryRow(`
-		SELECT id, team_name, os, username, secret_type, secret, domain, host, ip, created_at
+		SELECT id, team_name, os, username, secret_type, secret, rid, domain, host, ip, created_at
 		FROM credentials
 		WHERE id = ?
 	`, id).Scan(
@@ -337,6 +342,51 @@ func CreateCredential(teamName string, req CreateCredentialRequest) (*Credential
 		&credential.Username,
 		&credential.SecretType,
 		&credential.Secret,
+		&credential.RID,
+		&credential.Domain,
+		&credential.Host,
+		&credential.IP,
+		&credential.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &credential, nil
+}
+
+func CreateCredentialIfMissing(teamName string, req CreateCredentialRequest) (*Credential, error) {
+	var id int
+	err := db.QueryRow(`
+		SELECT id
+		FROM credentials
+		WHERE team_name = ? AND username = ? AND secret_type = ? AND secret = ?
+			AND rid = ? AND domain = ? AND host = ? AND ip = ?
+	`, teamName, req.Username, req.SecretType, req.Secret, req.RID, req.Domain, req.Host, req.IP).Scan(&id)
+	if err == nil {
+		return GetCredentialByID(id)
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	return CreateCredential(teamName, req)
+}
+
+func GetCredentialByID(id int) (*Credential, error) {
+	var credential Credential
+	err := db.QueryRow(`
+		SELECT id, team_name, os, username, secret_type, secret, rid, domain, host, ip, created_at
+		FROM credentials
+		WHERE id = ?
+	`, id).Scan(
+		&credential.ID,
+		&credential.TeamName,
+		&credential.OS,
+		&credential.Username,
+		&credential.SecretType,
+		&credential.Secret,
+		&credential.RID,
 		&credential.Domain,
 		&credential.Host,
 		&credential.IP,

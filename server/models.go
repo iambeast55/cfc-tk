@@ -37,6 +37,7 @@ type Credential struct {
 	Username   string `json:"username"`
 	SecretType string `json:"secretType"`
 	Secret     string `json:"secret"`
+	RID        string `json:"rid"`
 	Domain     string `json:"domain"`
 	Host       string `json:"host"`
 	IP         string `json:"ip"`
@@ -48,6 +49,7 @@ type CreateCredentialRequest struct {
 	Username   string `json:"username"`
 	SecretType string `json:"secretType"`
 	Secret     string `json:"secret"`
+	RID        string `json:"rid"`
 	Domain     string `json:"domain"`
 	Host       string `json:"host"`
 	IP         string `json:"ip"`
@@ -142,4 +144,27 @@ type RunKerberosTicketResponse struct {
 	Cache   *KerberosCache `json:"cache"`
 	Command []string       `json:"command"`
 	Output  string         `json:"output"`
+}
+
+type RunSecretsdumpRequest struct {
+	ToolCommand      string `json:"toolCommand"`
+	Target           string `json:"target"`
+	Domain           string `json:"domain"`
+	Username         string `json:"username"`
+	AuthMode         string `json:"authMode"`
+	Password         string `json:"password"`
+	LMHash           string `json:"lmHash"`
+	NTHash           string `json:"ntHash"`
+	AESKey           string `json:"aesKey"`
+	KDCHost          string `json:"kdcHost"`
+	UseKerberosCache bool   `json:"useKerberosCache"`
+	CachePath        string `json:"cachePath"`
+	JustDC           bool   `json:"justDc"`
+	UseVSS           bool   `json:"useVss"`
+}
+
+type RunSecretsdumpResponse struct {
+	Command     []string     `json:"command"`
+	Output      string       `json:"output"`
+	Credentials []Credential `json:"credentials"`
 }

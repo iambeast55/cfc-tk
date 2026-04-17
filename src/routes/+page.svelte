@@ -30,6 +30,7 @@
     username: string;
     secretType: string;
     secret: string;
+    rid: string;
     domain: string;
     host: string;
     ip: string;
@@ -41,6 +42,7 @@
     username: string;
     secretType: string;
     secret: string;
+    rid: string;
     domain: string;
     host: string;
     ip: string;
@@ -87,6 +89,12 @@
     cache: KerberosCache;
     command: string[];
     output: string;
+  }
+
+  interface RunSecretsdumpResponse {
+    command: string[];
+    output: string;
+    credentials: Credential[];
   }
 
   interface TargetForm {
@@ -213,6 +221,7 @@
     username: "",
     secretType: "ntlm",
     secret: "",
+    rid: "",
     domain: "",
     host: "",
     ip: ""
@@ -711,6 +720,7 @@
         username: "",
         secretType: "ntlm",
         secret: "",
+        rid: "",
         domain: "",
         host: "",
         ip: ""
@@ -1000,6 +1010,71 @@
       await loadKerberosCaches(commandForm.teamName);
     } catch (error) {
       commandError = error instanceof Error ? error.message : "Could not run Kerberos ticket command.";
+    } finally {
+      commandRunning = false;
+    }
+  };
+
+  const handleRunSecretsdump = async () => {
+    commandError = "";
+    commandRunOutput = "";
+
+    const target = commandTargetAddress;
+    if (!commandForm.teamName) {
+      commandError = "Select a team first.";
+      return;
+    }
+    if (!target) {
+      commandError = "Select a target or enter a manual target.";
+      return;
+    }
+    if (!commandForm.username.trim()) {
+      commandError = "Username is required.";
+      return;
+    }
+
+    commandRunning = true;
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(commandForm.teamName)}/secretsdump/run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toolCommand: impacketToolName("secretsdump"),
+            target,
+            domain: commandForm.domain.trim(),
+            username: commandForm.username.trim(),
+            authMode: commandForm.authMode,
+            password: commandForm.password,
+            lmHash: commandForm.lmHash.trim(),
+            ntHash: commandForm.ntHash.trim(),
+            aesKey: commandForm.aesKey.trim(),
+            kdcHost: commandForm.kdcHost.trim(),
+            useKerberosCache: commandForm.useKerberosCache,
+            cachePath: kerberosCachePath,
+            justDc: commandForm.justDc,
+            useVss: commandForm.useVss
+          })
+        }
+      );
+
+      if (!response.ok) {
+        commandError = await readError(response, "Could not run secretsdump.");
+        return;
+      }
+
+      const result = (await response.json()) as RunSecretsdumpResponse;
+      commandRunOutput = [
+        result.output || "secretsdump completed.",
+        "",
+        `Imported ${result.credentials.length} credential${result.credentials.length === 1 ? "" : "s"}.`
+      ].join("\n");
+      if (selectedCredentialTeam === commandForm.teamName) {
+        await loadCredentials(selectedCredentialTeam);
+      }
+    } catch (error) {
+      commandError = error instanceof Error ? error.message : "Could not run secretsdump.";
     } finally {
       commandRunning = false;
     }
@@ -1643,7 +1718,11 @@
                 <h2 class="mt-2 text-xl font-semibold text-white">{commandTitle}</h2>
               </div>
               <div class="flex flex-wrap gap-2">
-                {#if commandForm.commandKind === "getTGT" || commandForm.commandKind === "ticketer"}
+                {#if commandForm.commandKind === "secretsdump"}
+                  <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleRunSecretsdump}>
+                    {commandRunning ? "Running..." : "Run and import"}
+                  </Button>
+                {:else if commandForm.commandKind === "getTGT" || commandForm.commandKind === "ticketer"}
                   <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleRunKerberosTicket}>
                     {commandRunning ? "Running..." : "Run and save"}
                   </Button>
@@ -1826,6 +1905,17 @@
                   />
                 </label>
                 <label class="grid min-w-0 gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">RID</span>
+                  <input
+                    bind:value={credentialForm.rid}
+                    class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-rose-200/45"
+                    placeholder="optional"
+                  />
+                </label>
+              </div>
+
+              <div class="grid min-w-0 gap-3 2xl:grid-cols-2">
+                <label class="grid min-w-0 gap-2">
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Host</span>
                   <input
                     bind:value={credentialForm.host}
@@ -1878,12 +1968,13 @@
             </div>
 
             <div class="mt-5 overflow-x-auto rounded-md border border-white/10">
-              <table class="w-full min-w-[900px] border-collapse text-left text-sm">
+              <table class="w-full min-w-[980px] border-collapse text-left text-sm">
                 <thead class="bg-white/[0.045] text-xs uppercase tracking-[0.18em] text-white/45">
                   <tr>
                     <th class="px-3 py-3 font-semibold">OS</th>
                     <th class="px-3 py-3 font-semibold">Username</th>
                     <th class="px-3 py-3 font-semibold">Type</th>
+                    <th class="px-3 py-3 font-semibold">RID</th>
                     <th class="px-3 py-3 font-semibold">Credential</th>
                     <th class="px-3 py-3 font-semibold">Domain</th>
                     <th class="px-3 py-3 font-semibold">Host</th>
@@ -1893,11 +1984,11 @@
                 <tbody class="divide-y divide-white/10">
                   {#if credentialsLoading}
                     <tr>
-                      <td class="px-3 py-6 text-white/55" colspan="7">Loading credentials...</td>
+                      <td class="px-3 py-6 text-white/55" colspan="8">Loading credentials...</td>
                     </tr>
                   {:else if credentials.length === 0}
                     <tr>
-                      <td class="px-3 py-6 text-white/55" colspan="7">No credentials for this team yet.</td>
+                      <td class="px-3 py-6 text-white/55" colspan="8">No credentials for this team yet.</td>
                     </tr>
                   {:else}
                     {#each credentials as credential (credential.id)}
@@ -1905,6 +1996,7 @@
                         <td class="px-3 py-3 capitalize text-white/75">{credential.os}</td>
                         <td class="px-3 py-3 font-medium text-white">{credential.username}</td>
                         <td class="px-3 py-3 text-rose-100">{credential.secretType}</td>
+                        <td class="px-3 py-3 font-mono text-xs text-white/50">{credential.rid || "-"}</td>
                         <td class="max-w-[320px] px-3 py-3 font-mono text-xs text-teal-100">
                           <span class="block truncate" title={credential.secret}>{credential.secret}</span>
                         </td>
