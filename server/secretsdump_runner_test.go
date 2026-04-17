@@ -36,3 +36,17 @@ CORP\Administrator:aes128-cts-hmac-sha1-96:00112233445566778899aabbccddeeff
 		t.Fatalf("expected kerberos-aes128, got %s", credentials[3].SecretType)
 	}
 }
+
+func TestSecretsdumpCommandArgsRejectsIPForKerberos(t *testing.T) {
+	_, _, err := secretsdumpCommandArgs(RunSecretsdumpRequest{
+		Target:           "10.0.0.5",
+		Domain:           "CORP",
+		Username:         "administrator",
+		AuthMode:         "kerberos",
+		UseKerberosCache: true,
+		CachePath:        "server/team/corp.local/administrator.ccache",
+	})
+	if err == nil {
+		t.Fatal("expected Kerberos target IP error")
+	}
+}

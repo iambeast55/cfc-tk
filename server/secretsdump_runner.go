@@ -95,6 +95,9 @@ func secretsdumpCommandArgs(req RunSecretsdumpRequest) ([]string, []string, erro
 		}
 		args = append(args, "-hashes", req.LMHash+":"+req.NTHash, userPrefix+"@"+req.Target)
 	case "kerberos":
+		if looksLikeIPAddress(req.Target) {
+			return nil, nil, errors.New("Kerberos secretsdump requires a hostname or FQDN target; put the DC IP in -dc-ip")
+		}
 		args = append(args, "-k")
 		if req.UseKerberosCache || req.AESKey == "" {
 			args = append(args, "-no-pass")
@@ -111,6 +114,30 @@ func secretsdumpCommandArgs(req RunSecretsdumpRequest) ([]string, []string, erro
 	}
 
 	return args, env, nil
+}
+
+func looksLikeIPAddress(value string) bool {
+	if value == "" {
+		return false
+	}
+	if strings.Contains(value, ":") {
+		return true
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, char := range part {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func parseSecretsdumpCredentials(output string, fallbackDomain string, target string) []CreateCredentialRequest {

@@ -249,11 +249,22 @@
   const selectedCommandTarget = $derived(
     commandTargets.find((target) => String(target.id) === commandForm.targetId)
   );
-  const commandTargetAddress = $derived(
-    commandForm.targetId === "manual"
-      ? commandForm.manualTarget.trim()
-      : selectedCommandTarget?.ip || selectedCommandTarget?.hostname || ""
-  );
+  const selectedKerberosTargetName = $derived.by(() => {
+    if (!selectedCommandTarget?.hostname) return selectedCommandTarget?.ip || "";
+    const hostname = selectedCommandTarget.hostname.trim();
+    const domainName = selectedCommandTarget.domainName.trim();
+    if (domainName && !hostname.includes(".")) {
+      return `${hostname}.${domainName}`;
+    }
+    return hostname;
+  });
+  const commandTargetAddress = $derived.by(() => {
+    if (commandForm.targetId === "manual") return commandForm.manualTarget.trim();
+    if (commandForm.commandKind === "secretsdump" && commandForm.authMode === "kerberos") {
+      return selectedKerberosTargetName;
+    }
+    return selectedCommandTarget?.ip || selectedCommandTarget?.hostname || "";
+  });
 
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
@@ -1764,6 +1775,7 @@
                 <p>
                   <span class="font-semibold text-white/80">Kerberos</span>
                   uses a selected or exported cache with <code class="rounded bg-black/30 px-1 text-teal-100">-k -no-pass</code>.
+                  Use a hostname or FQDN target; keep the DC IP in <code class="rounded bg-black/30 px-1 text-teal-100">-dc-ip</code>.
                 </p>
               {:else if commandForm.commandKind === "getTGT"}
                 <p>
