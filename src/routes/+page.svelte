@@ -170,6 +170,7 @@
   let commandError = $state("");
   let commandCopied = $state(false);
   let lastLoadedCommandTeam = $state("");
+  let lastLoadedCredentialTeam = $state("");
   let impacketPreferenceReady = $state(false);
   let commandForm = $state<CommandForm>({
     teamName: "",
@@ -582,6 +583,8 @@
 
   $effect(() => {
     if (!selectedCredentialTeam) return;
+    if (selectedCredentialTeam === lastLoadedCredentialTeam) return;
+    lastLoadedCredentialTeam = selectedCredentialTeam;
     void loadCredentials(selectedCredentialTeam);
   });
 
@@ -1008,8 +1011,6 @@
 </svelte:head>
 
 <div class="min-h-screen bg-[#070b0d] text-[#e6edf0]">
-  <div class="pointer-events-none fixed inset-0 bg-[linear-gradient(120deg,rgba(45,212,191,0.10),transparent_32%,rgba(244,114,182,0.07)_68%,transparent)]"></div>
-  <div class="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(45,212,191,0.12),transparent_28%),radial-gradient(circle_at_78%_12%,rgba(132,204,22,0.08),transparent_24%)]"></div>
 
   <div class="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
     <header class="flex flex-col gap-5 border-b border-white/10 pb-5 md:flex-row md:items-center md:justify-between">
@@ -1047,7 +1048,7 @@
             "rounded-md border px-4 py-3 text-left transition",
             "hover:border-teal-300/45 hover:bg-teal-300/10",
             activeTab === tab.id
-              ? "border-teal-300/60 bg-teal-300/12 text-white shadow-[0_0_24px_rgba(45,212,191,0.12)]"
+              ? "border-teal-300/60 bg-teal-300/12 text-white"
               : "border-white/10 bg-white/[0.03] text-white/65"
           ]}
           aria-pressed={activeTab === tab.id}
@@ -1062,7 +1063,7 @@
     <main class="grid flex-1 gap-5 py-6">
       {#if activeTab === "main"}
         <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5 shadow-[0_18px_80px_rgba(0,0,0,0.28)]">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.25em] text-lime-200/60">Main</p>
@@ -1922,8 +1923,8 @@
     </main>
 
     {#if popupError}
-      <div class="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 backdrop-blur-sm">
-        <div class="w-full max-w-md rounded-md border border-rose-300/25 bg-[#111719] p-5 shadow-[0_24px_100px_rgba(0,0,0,0.5)]">
+      <div class="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4">
+        <div class="w-full max-w-md rounded-md border border-rose-300/25 bg-[#111719] p-5">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-rose-200/60">Add team failed</p>
           <h2 class="mt-3 text-xl font-semibold text-white">That team could not be added.</h2>
           <p class="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/65">{popupError}</p>
