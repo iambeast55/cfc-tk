@@ -30,6 +30,16 @@ This starts:
 
 The UI calls the API at `http://localhost:8080`.
 
+## Simple Ubuntu Run
+
+From the project root:
+
+```sh
+./ccfc-tk
+```
+
+The launcher installs Node dependencies if needed, builds the UI, builds the Go API server, starts the API on `http://localhost:8080`, and serves the UI on `http://127.0.0.1:5173`.
+
 ## Run One Side
 
 ```sh

@@ -31,3 +31,8 @@ server/*.so
 server/*.dylib
 server/bin/
 server/dist/
+server/**/*.ccache
+!server/*.go
+!server/go.mod
+!server/go.sum
+!server/README.md

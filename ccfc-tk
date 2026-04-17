@@ -1,0 +1,47 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+UI_HOST=${CFC_TK_UI_HOST:-127.0.0.1}
+UI_PORT=${CFC_TK_UI_PORT:-5173}
+SERVER_BIN="$ROOT_DIR/server/bin/cfc-tk-server"
+
+need_command() {
+	if ! command -v "$1" >/dev/null 2>&1; then
+		echo "Missing required command: $1" >&2
+		exit 1
+	fi
+}
+
+cleanup() {
+	if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+		kill "$SERVER_PID" >/dev/null 2>&1 || true
+	fi
+}
+
+trap cleanup INT TERM EXIT
+
+need_command npm
+need_command go
+
+cd "$ROOT_DIR"
+
+if [ ! -d node_modules ]; then
+	echo "[ccfc-tk] Installing Node dependencies..."
+	npm ci
+fi
+
+echo "[ccfc-tk] Building UI..."
+npm run build
+
+echo "[ccfc-tk] Building API server..."
+mkdir -p "$ROOT_DIR/server/bin"
+(cd "$ROOT_DIR/server" && go build -buildvcs=false -o "$SERVER_BIN" .)
+
+echo "[ccfc-tk] Starting API server on http://localhost:8080"
+(cd "$ROOT_DIR/server" && "$SERVER_BIN") &
+SERVER_PID=$!
+
+echo "[ccfc-tk] Starting UI on http://$UI_HOST:$UI_PORT"
+echo "[ccfc-tk] Press Ctrl+C to stop both processes."
+npx vite preview --host "$UI_HOST" --port "$UI_PORT" --strictPort
