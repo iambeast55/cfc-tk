@@ -4,7 +4,11 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "node scripts/dev.mjs",
+		"dev:all": "node scripts/dev.mjs",
+		"dev:ui": "vite dev",
+		"server:dev": "cd server && go run -buildvcs=false .",
+		"server:build": "cd server && go build -buildvcs=false .",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
@@ -36,13 +40,8 @@
 		"vite": "^7.2.6"
 	},
 	"dependencies": {
-		"@types/xterm": "^2.0.3",
-		"@xterm/addon-fit": "^0.11.0",
-		"@xterm/xterm": "^6.0.0",
 		"lucide-svelte": "^0.562.0",
 		"mode-watcher": "^1.1.0",
-		"node-watcher": "^0.0.4",
-		"xterm": "^5.3.0",
-		"xterm-addon-fit": "^0.8.0"
+		"node-watcher": "^0.0.4"
 	}
 }

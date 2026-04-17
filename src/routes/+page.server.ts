@@ -55,15 +55,10 @@ export const actions: Actions = {
 
 				// if backend responds with non-2xx, include body text/json (if present) for debugging
 				if (!response.ok) {
-					let details = '';
-					try {
-						const body = await response.text();
-						details = body ? `: ${body}` : '';
-					} catch (e) {
-						details = '';
-					}
-					console.error(`Backend error adding team${details}`);
-					return { success: false, error: `Failed to add team${details}` };
+					const details = await response.text().catch(() => '');
+					const message = details.trim() || 'Failed to add team';
+					console.error(`Backend error adding team: ${message}`);
+					return fail(response.status, { success: false, error: message });
 				}
 
 				const newTeam = await response.json();

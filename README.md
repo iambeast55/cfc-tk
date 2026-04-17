@@ -1,38 +1,57 @@
-# sv
+# CFC-TK
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+CFC-TK now contains both the Svelte UI and the local Go API server in one project.
 
-## Creating a project
+## Requirements
 
-If you're seeing this, you've probably already done this step. Congrats!
+- Node.js and npm
+- Go 1.24 or newer
+
+## Install
 
 ```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
+npm install
+cd server
+go mod download
 ```
 
-## Developing
+## Run Everything
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+From the project root:
 
 ```sh
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+This starts:
 
-To create a production version of your app:
+- UI: `http://localhost:5173`
+- API server: `http://localhost:8080`
+
+The UI calls the API at `http://localhost:8080`.
+
+## Run One Side
+
+```sh
+npm run dev:ui
+npm run server:dev
+```
+
+## Build
 
 ```sh
 npm run build
+npm run server:build
 ```
 
-You can preview the production build with `npm run preview`.
+## Project Layout
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+```text
+cfc-tk/
+|-- src/       # Svelte UI
+|-- static/    # Static UI assets
+|-- server/    # Go REST API and SQLite storage
+`-- scripts/   # Development helpers
+```
+
+The server stores local data in `server/teams.db`. That file is ignored by git and is created automatically if it does not exist.

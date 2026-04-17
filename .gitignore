@@ -21,3 +21,13 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Server
+.gocache/
+server/teams.db
+server/*.exe
+server/*.dll
+server/*.so
+server/*.dylib
+server/bin/
+server/dist/
