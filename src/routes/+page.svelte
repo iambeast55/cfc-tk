@@ -114,12 +114,14 @@
 
   interface CommandForm {
     teamName: string;
-    commandKind: "secretsdump" | "getTGT" | "ticketer" | "wmiexec";
+    commandKind: "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
     impacketStyle: "kali" | "pythonScripts" | "custom";
     customSecretsdump: string;
     customGetTGT: string;
     customTicketer: string;
     customWmiexec: string;
+    customSmbexec: string;
+    customDcomexec: string;
     targetId: string;
     manualTarget: string;
     authMode: "password" | "hash" | "kerberos";
@@ -146,7 +148,7 @@
   }
 
   type TabId = "main" | "command" | "notes" | "credentials";
-  type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec";
+  type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-tk.impacketCustomTools";
@@ -198,6 +200,8 @@
     customGetTGT: "",
     customTicketer: "",
     customWmiexec: "",
+    customSmbexec: "",
+    customDcomexec: "",
     targetId: "",
     manualTarget: "",
     authMode: "password",
@@ -270,7 +274,11 @@
     }
     return hostname;
   });
-  const isInteractiveCommand = $derived(commandForm.commandKind === "wmiexec");
+  const isInteractiveCommand = $derived(
+    commandForm.commandKind === "wmiexec" ||
+      commandForm.commandKind === "smbexec" ||
+      commandForm.commandKind === "dcomexec"
+  );
   const usesTarget = $derived(commandForm.commandKind === "secretsdump" || isInteractiveCommand);
   const selectedCommandTargetLabel = $derived.by(() => {
     if (commandForm.targetId === "manual") return commandForm.manualTarget.trim();
@@ -333,7 +341,9 @@
     if (tool === "secretsdump") return commandForm.customSecretsdump.trim() || "impacket-secretsdump";
     if (tool === "getTGT") return commandForm.customGetTGT.trim() || "impacket-getTGT";
     if (tool === "ticketer") return commandForm.customTicketer.trim() || "impacket-ticketer";
-    return commandForm.customWmiexec.trim() || "impacket-wmiexec";
+    if (tool === "wmiexec") return commandForm.customWmiexec.trim() || "impacket-wmiexec";
+    if (tool === "smbexec") return commandForm.customSmbexec.trim() || "impacket-smbexec";
+    return commandForm.customDcomexec.trim() || "impacket-dcomexec";
   };
 
   const safePathPart = (value: string, fallback: string) =>
@@ -682,7 +692,9 @@
         secretsdump: commandForm.customSecretsdump,
         getTGT: commandForm.customGetTGT,
         ticketer: commandForm.customTicketer,
-        wmiexec: commandForm.customWmiexec
+        wmiexec: commandForm.customWmiexec,
+        smbexec: commandForm.customSmbexec,
+        dcomexec: commandForm.customDcomexec
       })
     );
   });
@@ -702,7 +714,9 @@
           customSecretsdump: customTools.secretsdump ?? commandForm.customSecretsdump,
           customGetTGT: customTools.getTGT ?? commandForm.customGetTGT,
           customTicketer: customTools.ticketer ?? commandForm.customTicketer,
-          customWmiexec: customTools.wmiexec ?? commandForm.customWmiexec
+          customWmiexec: customTools.wmiexec ?? commandForm.customWmiexec,
+          customSmbexec: customTools.smbexec ?? commandForm.customSmbexec,
+          customDcomexec: customTools.dcomexec ?? commandForm.customDcomexec
         };
       } catch {
         localStorage.removeItem(IMPACKET_CUSTOM_TOOLS_KEY);
@@ -1264,8 +1278,8 @@
       commandError = "Select a team first.";
       return;
     }
-    if (commandForm.commandKind !== "wmiexec") {
-      commandError = "Switch to wmiexec before launching an interactive terminal.";
+    if (!isInteractiveCommand) {
+      commandError = "Switch to an interactive command before launching a terminal.";
       return;
     }
     if (!target) {
@@ -1286,7 +1300,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             commandKind: commandForm.commandKind,
-            toolCommand: impacketToolName("wmiexec"),
+            toolCommand: impacketToolName(commandForm.commandKind),
             target,
             targetLabel: selectedCommandTargetLabel,
             domain: commandForm.domain.trim(),
@@ -1304,14 +1318,14 @@
       );
 
       if (!response.ok) {
-        commandError = await readError(response, "Could not launch wmiexec.");
+        commandError = await readError(response, `Could not launch ${commandForm.commandKind}.`);
         return;
       }
 
       const result = (await response.json()) as LaunchInteractiveCommandResponse;
       commandRunOutput = `Launched ${result.title} in ${result.terminal}. cfc-tk is not tracking this shell.`;
     } catch (error) {
-      commandError = error instanceof Error ? error.message : "Could not launch wmiexec.";
+      commandError = error instanceof Error ? error.message : `Could not launch ${commandForm.commandKind}.`;
     } finally {
       commandRunning = false;
     }
@@ -1661,6 +1675,8 @@
                 >
                   <option class="bg-[#0d1316]" value="secretsdump">Credential dump: secretsdump</option>
                   <option class="bg-[#0d1316]" value="wmiexec">Interactive shell: wmiexec</option>
+                  <option class="bg-[#0d1316]" value="smbexec">Interactive shell: smbexec</option>
+                  <option class="bg-[#0d1316]" value="dcomexec">Interactive shell: dcomexec</option>
                   <option class="bg-[#0d1316]" value="getTGT">Kerberos cache: getTGT</option>
                   <option class="bg-[#0d1316]" value="ticketer">Kerberos cache: ticketer</option>
                 </select>
@@ -1679,7 +1695,7 @@
               </label>
 
               {#if commandForm.impacketStyle === "custom"}
-                <div class="grid min-w-0 gap-3 2xl:grid-cols-4">
+                <div class="grid min-w-0 gap-3 2xl:grid-cols-3">
                   <label class="grid min-w-0 gap-2">
                     <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">secretsdump</span>
                     <input
@@ -1710,6 +1726,22 @@
                       bind:value={commandForm.customWmiexec}
                       class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
                       placeholder="impacket-wmiexec"
+                    />
+                  </label>
+                  <label class="grid min-w-0 gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">smbexec</span>
+                    <input
+                      bind:value={commandForm.customSmbexec}
+                      class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                      placeholder="impacket-smbexec"
+                    />
+                  </label>
+                  <label class="grid min-w-0 gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">dcomexec</span>
+                    <input
+                      bind:value={commandForm.customDcomexec}
+                      class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                      placeholder="impacket-dcomexec"
                     />
                   </label>
                 </div>
@@ -2009,7 +2041,7 @@
                   <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleRunSecretsdump}>
                     {commandRunning ? "Running..." : "Run and import"}
                   </Button>
-                {:else if commandForm.commandKind === "wmiexec"}
+                {:else if isInteractiveCommand}
                   <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleLaunchInteractiveCommand}>
                     {commandRunning ? "Launching..." : "Launch terminal"}
                   </Button>
@@ -2057,9 +2089,9 @@
                   uses a selected or exported cache with <code class="rounded bg-black/30 px-1 text-teal-100">-k -no-pass</code>.
                   Use a hostname or FQDN target; keep the DC IP in <code class="rounded bg-black/30 px-1 text-teal-100">-dc-ip</code>.
                 </p>
-              {:else if commandForm.commandKind === "wmiexec"}
+              {:else if isInteractiveCommand}
                 <p>
-                  <span class="font-semibold text-white/80">wmiexec</span>
+                  <span class="font-semibold text-white/80">{commandForm.commandKind}</span>
                   opens a local Linux terminal titled <code class="rounded bg-black/30 px-1 text-teal-100">team:box</code>.
                   cfc-tk hands off the shell and does not capture its output.
                 </p>

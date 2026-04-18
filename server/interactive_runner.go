@@ -20,8 +20,8 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("interactive terminal launch is supported on Linux only")
 	}
-	if req.CommandKind != "wmiexec" {
-		return nil, errors.New("interactive command must be wmiexec")
+	if !isInteractiveCommandKind(req.CommandKind) {
+		return nil, errors.New("interactive command must be wmiexec, smbexec, or dcomexec")
 	}
 
 	commandParts := splitToolCommand(req.ToolCommand)
@@ -81,7 +81,7 @@ func interactiveCommandArgs(req LaunchInteractiveCommandRequest) ([]string, []st
 		args = append(args, "-hashes", req.LMHash+":"+req.NTHash, userPrefix+"@"+req.Target)
 	case "kerberos":
 		if looksLikeIPAddress(req.Target) {
-			return nil, nil, errors.New("Kerberos wmiexec requires a hostname or FQDN target; put the DC IP in -dc-ip")
+			return nil, nil, fmt.Errorf("Kerberos %s requires a hostname or FQDN target; put the DC IP in -dc-ip", req.CommandKind)
 		}
 		args = append(args, "-k")
 		if req.UseKerberosCache || req.AESKey == "" {
@@ -129,7 +129,7 @@ func terminalShellCommand(title string, env []string, command []string) string {
 	lines = append(lines, strings.Join(quoted, " "))
 	lines = append(lines, "status=$?")
 	lines = append(lines, "echo")
-	lines = append(lines, "printf 'cfc-tk: wmiexec exited with status %s\\n' \"$status\"")
+	lines = append(lines, "printf "+shQuote(fmt.Sprintf("cfc-tk: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
 	lines = append(lines, "read -r -p 'Press Enter to close this terminal...' _")
 	lines = append(lines, "exit \"$status\"")
 	return strings.Join(lines, "; ")
@@ -172,4 +172,15 @@ func shQuote(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func isInteractiveCommandKind(value string) bool {
+	return value == "wmiexec" || value == "smbexec" || value == "dcomexec"
+}
+
+func commandName(command []string) string {
+	if len(command) == 0 {
+		return "command"
+	}
+	return command[0]
 }
