@@ -160,6 +160,8 @@
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-tk.impacketCustomTools";
+  const credentialScopeFilters = ["users", "all", "domain", "local", "machines"] as const;
+  const credentialTypeFilters = ["all", "ntlm", "password", "aes"] as const;
 
   let { data } = $props();
   let activeTab = $state<TabId>("main");
@@ -204,6 +206,10 @@
   let easyRunning = $state(false);
   let easyError = $state("");
   let easyOutput = $state("");
+  let easyCredentialPickerOpen = $state(false);
+  let easyCredentialSearch = $state("");
+  let easyCredentialScopeFilter = $state<"users" | "all" | "domain" | "local" | "machines">("users");
+  let easyCredentialTypeFilter = $state<"all" | "ntlm" | "password" | "aes">("all");
   let lastLoadedEasyTeam = $state("");
   let lastLoadedCredentialTeam = $state("");
   let impacketPreferenceReady = $state(false);
@@ -333,6 +339,40 @@
   const selectedEasyCredential = $derived(
     easyCredentialOptions.find((credential) => String(credential.id) === easyMode.credentialId)
   );
+  const credentialSearchText = (credential: Credential) =>
+    [
+      credentialIdentity(credential),
+      credential.secretType,
+      credential.secret,
+      credential.rid,
+      credential.domain,
+      credential.host,
+      credential.ip,
+      credential.createdAt
+    ]
+      .join(" ")
+      .toLowerCase();
+  const filteredEasyCredentialOptions = $derived.by(() => {
+    const search = easyCredentialSearch.trim().toLowerCase();
+
+    return easyCredentialOptions.filter((credential) => {
+      const isMachine = credential.username.endsWith("$");
+      const isDomain = Boolean(credential.domain);
+      const typeMatches =
+        easyCredentialTypeFilter === "all" ||
+        (easyCredentialTypeFilter === "ntlm" && (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm")) ||
+        (easyCredentialTypeFilter === "password" && credential.secretType === "password") ||
+        (easyCredentialTypeFilter === "aes" && credential.secretType.includes("aes"));
+      const scopeMatches =
+        easyCredentialScopeFilter === "all" ||
+        (easyCredentialScopeFilter === "users" && !isMachine) ||
+        (easyCredentialScopeFilter === "domain" && isDomain) ||
+        (easyCredentialScopeFilter === "local" && !isDomain) ||
+        (easyCredentialScopeFilter === "machines" && isMachine);
+
+      return typeMatches && scopeMatches && (!search || credentialSearchText(credential).includes(search));
+    });
+  });
   const targetFqdn = (target: Target | undefined) => {
     if (!target) return "";
     const hostname = target.hostname.trim();
@@ -430,14 +470,6 @@
     ]
       .filter(Boolean)
       .join(" / ");
-
-  const credentialSelectLabel = (credential: Credential) =>
-    [
-      credentialIdentity(credential),
-      credential.secretType,
-      credentialSecretHint(credential),
-      `added ${credentialAddedLabel(credential)}`
-    ].join(" / ");
 
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
@@ -2030,18 +2062,37 @@
 
               <label class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential</span>
-                <select
-                  bind:value={easyMode.credentialId}
-                  class="w-full min-w-0 max-w-full truncate rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
-                  disabled={easyCredentialOptions.length === 0 || easyRunning}
-                >
-                  <option class="bg-[#0d1316]" value="">Pick credential</option>
-                  {#each easyCredentialOptions as credential (credential.id)}
-                    <option class="bg-[#0d1316]" value={String(credential.id)}>
-                      {credentialSelectLabel(credential)}
-                    </option>
-                  {/each}
-                </select>
+                <div class="min-w-0 rounded-md border border-white/10 bg-black/20 p-3">
+                  {#if selectedEasyCredential}
+                    <span class="block truncate font-mono text-sm text-teal-100">{credentialIdentity(selectedEasyCredential)}</span>
+                    <span class="mt-1 block truncate text-xs text-white/45">
+                      {selectedEasyCredential.secretType} / {credentialSecretHint(selectedEasyCredential)} / added {credentialAddedLabel(selectedEasyCredential)}
+                    </span>
+                    {#if credentialContextLabel(selectedEasyCredential)}
+                      <span class="mt-1 block truncate text-xs text-white/35">{credentialContextLabel(selectedEasyCredential)}</span>
+                    {/if}
+                  {:else}
+                    <span class="block text-sm text-white/45">No credential selected.</span>
+                  {/if}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    disabled={easyCredentialOptions.length === 0 || easyRunning}
+                    class="bg-lime-200 text-slate-950 hover:bg-lime-100"
+                    onclick={() => (easyCredentialPickerOpen = true)}
+                  >
+                    Choose credential
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!easyMode.credentialId || easyRunning}
+                    class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                    onclick={() => (easyMode = { ...easyMode, credentialId: "" })}
+                  >
+                    Clear
+                  </Button>
+                </div>
                 <span class="text-xs text-white/35">Newest credentials are listed first, with short hash/key fingerprints.</span>
               </label>
 
@@ -2868,6 +2919,101 @@
         </section>
       {/if}
     </main>
+
+    {#if easyCredentialPickerOpen}
+      <div class="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
+        <div class="grid max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-md border border-lime-300/20 bg-[#111719]">
+          <div class="border-b border-white/10 p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-lime-200/60">Credential picker</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">Choose a credential</h2>
+                <p class="mt-2 text-sm text-white/55">Search, filter, and pick from the newest matching credentials.</p>
+              </div>
+              <Button
+                type="button"
+                class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                onclick={() => (easyCredentialPickerOpen = false)}
+              >
+                Close
+              </Button>
+            </div>
+
+            <div class="mt-4 grid gap-3">
+              <input
+                bind:value={easyCredentialSearch}
+                class="w-full min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45"
+                placeholder="Search user, domain, RID, host, IP, type, hash suffix"
+              />
+              <div class="flex flex-wrap gap-2">
+                {#each credentialScopeFilters as scope}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition",
+                      easyCredentialScopeFilter === scope
+                        ? "border-lime-200/60 bg-lime-200/15 text-lime-100"
+                        : "border-white/10 bg-white/[0.04] text-white/55 hover:border-lime-200/35"
+                    ]}
+                    onclick={() => (easyCredentialScopeFilter = scope)}
+                  >
+                    {scope}
+                  </button>
+                {/each}
+              </div>
+              <div class="flex flex-wrap gap-2">
+                {#each credentialTypeFilters as type}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition",
+                      easyCredentialTypeFilter === type
+                        ? "border-teal-200/60 bg-teal-200/15 text-teal-100"
+                        : "border-white/10 bg-white/[0.04] text-white/55 hover:border-teal-200/35"
+                    ]}
+                    onclick={() => (easyCredentialTypeFilter = type)}
+                  >
+                    {type}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          </div>
+
+          <div class="min-h-0 overflow-y-auto p-3">
+            {#if filteredEasyCredentialOptions.length === 0}
+              <p class="rounded-md border border-white/10 bg-black/20 p-5 text-sm text-white/55">No credentials match those filters.</p>
+            {:else}
+              <div class="grid gap-2">
+                {#each filteredEasyCredentialOptions as credential (credential.id)}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-3 text-left transition",
+                      easyMode.credentialId === String(credential.id)
+                        ? "border-lime-200/60 bg-lime-200/12"
+                        : "border-white/10 bg-white/[0.035] hover:border-lime-200/35 hover:bg-lime-200/10"
+                    ]}
+                    onclick={() => {
+                      easyMode = { ...easyMode, credentialId: String(credential.id) };
+                      easyCredentialPickerOpen = false;
+                    }}
+                  >
+                    <span class="block truncate font-mono text-sm text-teal-100">{credentialIdentity(credential)}</span>
+                    <span class="mt-1 block text-xs text-white/50">
+                      {credential.secretType} / {credentialSecretHint(credential)} / added {credentialAddedLabel(credential)}
+                    </span>
+                    {#if credentialContextLabel(credential)}
+                      <span class="mt-1 block text-xs text-white/35">{credentialContextLabel(credential)}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
 
     {#if popupError}
       <div class="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4">
