@@ -170,6 +170,8 @@
   });
   let commandTargets = $state<Target[]>([]);
   let commandTargetsLoading = $state(false);
+  let commandCredentials = $state<Credential[]>([]);
+  let commandCredentialsLoading = $state(false);
   let kerberosCaches = $state<KerberosCache[]>([]);
   let kerberosCachesLoading = $state(false);
   let kerberosCacheSaved = $state(false);
@@ -335,6 +337,26 @@
         cache.status === "available"
     )
   );
+  const credentialMatchesCommandAuth = (credential: Credential) => {
+    if (commandForm.commandKind === "ticketer") {
+      return credential.username.toLowerCase() === "krbtgt" && credential.secretType.includes("aes");
+    }
+    if (commandForm.commandKind === "getTGT") {
+      if (commandForm.ticketAuthMode === "password") return credential.secretType === "password";
+      if (commandForm.ticketAuthMode === "hash") return credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm";
+      return credential.secretType.includes("aes");
+    }
+    if (commandForm.authMode === "password") return credential.secretType === "password";
+    if (commandForm.authMode === "hash") return credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm";
+    return credential.secretType.includes("aes");
+  };
+  const commandCredentialOptions = $derived.by(() => {
+    const selectedDomain = commandForm.domain.trim().toLowerCase();
+    return commandCredentials
+      .filter(credentialMatchesCommandAuth)
+      .filter((credential) => !selectedDomain || credential.domain.toLowerCase() === selectedDomain)
+      .slice(0, 50);
+  });
 
   const kerberosCachePath = $derived(commandForm.cachePath.trim() || defaultKerberosCachePath);
 
@@ -470,6 +492,27 @@
     }
   };
 
+  const loadCommandCredentials = async (teamName: string) => {
+    commandCredentialsLoading = true;
+
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/credentials`
+      );
+
+      if (!response.ok) {
+        commandCredentials = [];
+        return;
+      }
+
+      commandCredentials = (await response.json()) as Credential[];
+    } catch {
+      commandCredentials = [];
+    } finally {
+      commandCredentialsLoading = false;
+    }
+  };
+
   const loadDomains = async (teamName: string) => {
     domainsLoading = true;
     domainError = "";
@@ -598,6 +641,7 @@
     lastLoadedCommandTeam = commandForm.teamName;
     void loadCommandTargets(commandForm.teamName);
     void loadKerberosCaches(commandForm.teamName);
+    void loadCommandCredentials(commandForm.teamName);
     commandForm = { ...commandForm, targetId: "", manualTarget: "" };
   });
 
@@ -893,6 +937,36 @@
       cachePath: cache.cachePath,
       useKerberosCache: true
     };
+  };
+
+  const handleUseCredential = (credential: Credential) => {
+    const [lmHash, ntHash] = credential.secret.includes(":")
+      ? credential.secret.split(":", 2)
+      : ["", credential.secret];
+    const nextForm = {
+      ...commandForm,
+      domain: credential.domain || commandForm.domain,
+      username: commandForm.commandKind === "ticketer" ? commandForm.username : credential.username,
+      password: credential.secretType === "password" ? credential.secret : commandForm.password,
+      lmHash:
+        credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm"
+          ? lmHash
+          : commandForm.lmHash,
+      ntHash:
+        credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm"
+          ? ntHash
+          : commandForm.ntHash,
+      aesKey:
+        commandForm.commandKind !== "ticketer" && credential.secretType.includes("aes")
+          ? credential.secret
+          : commandForm.aesKey,
+      krbtgtAesKey:
+        commandForm.commandKind === "ticketer" && credential.secretType.includes("aes")
+          ? credential.secret
+          : commandForm.krbtgtAesKey
+    };
+
+    commandForm = nextForm;
   };
 
   const handleSaveKerberosCache = async () => {
@@ -1539,6 +1613,35 @@
                     </span>
                   </label>
                 </div>
+                {/if}
+              </div>
+
+              <div class="grid gap-2 rounded-md border border-white/10 bg-black/20 p-3">
+                <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Saved credentials</span>
+                  <span class="text-xs text-white/40">{commandCredentialOptions.length} usable</span>
+                </div>
+                {#if commandCredentialsLoading}
+                  <p class="text-sm text-white/50">Loading credentials...</p>
+                {:else if commandCredentialOptions.length === 0}
+                  <p class="text-sm text-white/45">No saved credentials match this command and auth mode.</p>
+                {:else}
+                  <div class="grid gap-2">
+                    {#each commandCredentialOptions as credential (credential.id)}
+                      <button
+                        type="button"
+                        class="rounded-md border border-white/10 bg-white/[0.035] px-3 py-2 text-left text-sm transition hover:border-teal-300/45 hover:bg-teal-300/10"
+                        onclick={() => handleUseCredential(credential)}
+                      >
+                        <span class="block font-mono text-teal-100">
+                          {credential.domain ? `${credential.domain}\\` : ""}{credential.username}
+                        </span>
+                        <span class="mt-1 block text-xs text-white/45">
+                          {credential.secretType}{credential.rid ? ` / RID ${credential.rid}` : ""}{credential.host ? ` / ${credential.host}` : ""}
+                        </span>
+                      </button>
+                    {/each}
+                  </div>
                 {/if}
               </div>
 
