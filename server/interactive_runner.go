@@ -63,6 +63,16 @@ func interactiveCommandArgs(req LaunchInteractiveCommandRequest) ([]string, []st
 	}
 
 	args := []string{}
+	if req.CommandKind == "dcomexec" {
+		dcomObject := req.DCOMObject
+		if dcomObject == "" {
+			dcomObject = "ShellBrowserWindow"
+		}
+		if !isSupportedDCOMObject(dcomObject) {
+			return nil, nil, errors.New("DCOM object must be ShellBrowserWindow, MMC20, or ShellWindows")
+		}
+		args = append(args, "-object", dcomObject)
+	}
 	if req.KDCHost != "" {
 		args = append(args, "-dc-ip", req.KDCHost)
 	}
@@ -176,6 +186,10 @@ func shQuote(value string) string {
 
 func isInteractiveCommandKind(value string) bool {
 	return value == "wmiexec" || value == "smbexec" || value == "dcomexec"
+}
+
+func isSupportedDCOMObject(value string) bool {
+	return value == "ShellBrowserWindow" || value == "MMC20" || value == "ShellWindows"
 }
 
 func commandName(command []string) string {

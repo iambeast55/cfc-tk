@@ -122,6 +122,7 @@
     customWmiexec: string;
     customSmbexec: string;
     customDcomexec: string;
+    dcomObject: "ShellBrowserWindow" | "MMC20" | "ShellWindows";
     targetId: string;
     manualTarget: string;
     authMode: "password" | "hash" | "kerberos";
@@ -202,6 +203,7 @@
     customWmiexec: "",
     customSmbexec: "",
     customDcomexec: "",
+    dcomObject: "ShellBrowserWindow",
     targetId: "",
     manualTarget: "",
     authMode: "password",
@@ -457,6 +459,10 @@
     if (!target) return "Select a target or enter a manual target.";
 
     const args = [impacketToolName(commandForm.commandKind)];
+
+    if (commandForm.commandKind === "dcomexec") {
+      args.push("-object", commandForm.dcomObject);
+    }
 
     if (commandForm.commandKind === "secretsdump" && commandForm.justDc) {
       args.push("-just-dc");
@@ -1300,6 +1306,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             commandKind: commandForm.commandKind,
+            dcomObject: commandForm.commandKind === "dcomexec" ? commandForm.dcomObject : "",
             toolCommand: impacketToolName(commandForm.commandKind),
             target,
             targetLabel: selectedCommandTargetLabel,
@@ -1745,6 +1752,20 @@
                     />
                   </label>
                 </div>
+              {/if}
+
+              {#if commandForm.commandKind === "dcomexec"}
+                <label class="grid gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">DCOM object</span>
+                  <select
+                    bind:value={commandForm.dcomObject}
+                    class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-teal-200/45"
+                  >
+                    <option class="bg-[#0d1316]" value="ShellBrowserWindow">ShellBrowserWindow</option>
+                    <option class="bg-[#0d1316]" value="MMC20">MMC20</option>
+                    <option class="bg-[#0d1316]" value="ShellWindows">ShellWindows</option>
+                  </select>
+                </label>
               {/if}
 
               {#if usesTarget}

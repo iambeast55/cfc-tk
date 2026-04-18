@@ -171,6 +171,7 @@ type RunSecretsdumpResponse struct {
 
 type LaunchInteractiveCommandRequest struct {
 	CommandKind      string `json:"commandKind"`
+	DCOMObject       string `json:"dcomObject"`
 	ToolCommand      string `json:"toolCommand"`
 	Target           string `json:"target"`
 	TargetLabel      string `json:"targetLabel"`
