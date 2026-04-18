@@ -391,6 +391,46 @@
     };
   };
 
+  const credentialIdentity = (credential: Credential) =>
+    `${credential.domain ? `${credential.domain}\\` : ""}${credential.username}`;
+
+  const credentialSecretHint = (credential: Credential) => {
+    if (!credential.secret) return "empty";
+    if (credential.secretType === "password") return "password";
+    if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") {
+      const parts = credential.secret.split(":");
+      const ntHash = credential.secret.includes(":") ? parts[parts.length - 1] || "" : credential.secret;
+      return `NT ...${ntHash.slice(-8)}`;
+    }
+    if (credential.secretType.includes("aes")) {
+      return `key ...${credential.secret.slice(-8)}`;
+    }
+    return `...${credential.secret.slice(-8)}`;
+  };
+
+  const credentialAddedLabel = (credential: Credential) =>
+    credential.createdAt ? credential.createdAt.replace("T", " ").replace("Z", " UTC").slice(0, 19) : "unknown";
+
+  const credentialContextLabel = (credential: Credential) =>
+    [
+      credential.rid ? `RID ${credential.rid}` : "",
+      credential.host ? `host ${credential.host}` : "",
+      credential.ip ? `ip ${credential.ip}` : ""
+    ]
+      .filter(Boolean)
+      .join(" / ");
+
+  const credentialPickerLabel = (credential: Credential) =>
+    [
+      credentialIdentity(credential),
+      credential.secretType,
+      credentialSecretHint(credential),
+      credentialContextLabel(credential),
+      `added ${credentialAddedLabel(credential)}`
+    ]
+      .filter(Boolean)
+      .join(" / ");
+
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
     return body.trim() || fallback;
@@ -1990,10 +2030,11 @@
                   <option class="bg-[#0d1316]" value="">Pick credential</option>
                   {#each easyCredentialOptions as credential (credential.id)}
                     <option class="bg-[#0d1316]" value={String(credential.id)}>
-                      {credential.domain ? `${credential.domain}\\` : ""}{credential.username} / {credential.secretType}
+                      {credentialPickerLabel(credential)}
                     </option>
                   {/each}
                 </select>
+                <span class="text-xs text-white/35">Newest credentials are listed first, with short hash/key fingerprints.</span>
               </label>
 
               <label class="grid gap-2">
@@ -2072,7 +2113,7 @@
                 <div class="mt-3 grid gap-2 font-mono text-xs text-white/65">
                   <span>DC: {selectedEasyDc ? `${easyDcFqdn} (${selectedEasyDc.ip})` : "not selected"}</span>
                   <span>Shell target: {selectedEasyShellTarget ? `${selectedEasyShellTarget.hostname || selectedEasyShellTarget.ip} (${selectedEasyShellTarget.ip})` : "not selected"}</span>
-                  <span>Credential: {selectedEasyCredential ? `${selectedEasyCredential.domain ? `${selectedEasyCredential.domain}\\` : ""}${selectedEasyCredential.username} / ${selectedEasyCredential.secretType}` : "not selected"}</span>
+                  <span>Credential: {selectedEasyCredential ? credentialPickerLabel(selectedEasyCredential) : "not selected"}</span>
                 </div>
               </div>
             </div>
@@ -2281,6 +2322,7 @@
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Saved credentials</span>
                   <span class="text-xs text-white/40">{commandCredentialOptions.length} usable</span>
                 </div>
+                <p class="text-xs text-white/35">Newest matches are listed first.</p>
                 {#if commandCredentialsLoading}
                   <p class="text-sm text-white/50">Loading credentials...</p>
                 {:else if commandCredentialOptions.length === 0}
@@ -2294,11 +2336,14 @@
                         onclick={() => handleUseCredential(credential)}
                       >
                         <span class="block font-mono text-teal-100">
-                          {credential.domain ? `${credential.domain}\\` : ""}{credential.username}
+                          {credentialIdentity(credential)}
                         </span>
                         <span class="mt-1 block text-xs text-white/45">
-                          {credential.secretType}{credential.rid ? ` / RID ${credential.rid}` : ""}{credential.host ? ` / ${credential.host}` : ""}
+                          {credential.secretType} / {credentialSecretHint(credential)} / added {credentialAddedLabel(credential)}
                         </span>
+                        {#if credentialContextLabel(credential)}
+                          <span class="mt-1 block text-xs text-white/35">{credentialContextLabel(credential)}</span>
+                        {/if}
                       </button>
                     {/each}
                   </div>
