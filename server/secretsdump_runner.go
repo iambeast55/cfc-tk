@@ -143,21 +143,32 @@ func looksLikeIPAddress(value string) bool {
 func parseSecretsdumpCredentials(output string, fallbackDomain string, target string) []CreateCredentialRequest {
 	seen := map[string]bool{}
 	var credentials []CreateCredentialRequest
+	inLocalSAMSection := false
 
 	for _, rawLine := range strings.Split(output, "\n") {
 		line := strings.TrimSpace(rawLine)
+		if strings.Contains(line, "Dumping local SAM hashes") {
+			inLocalSAMSection = true
+			continue
+		}
+		if strings.Contains(line, "Dumping Domain Credentials") || strings.Contains(line, "Dumping Domain Credentials (domain") || strings.Contains(line, "Kerberos keys") {
+			inLocalSAMSection = false
+			continue
+		}
 		if line == "" || strings.HasPrefix(line, "[") || strings.HasPrefix(line, "*") {
 			continue
 		}
 
 		if matches := ntlmDumpPattern.FindStringSubmatch(line); matches != nil {
-			accountDomain, username := splitDumpAccount(matches[1], fallbackDomain)
+			accountDomain, username := splitDumpAccount(matches[1], fallbackDomain, inLocalSAMSection)
 			rid := matches[2]
 			lmHash := strings.ToLower(matches[3])
 			ntHash := strings.ToLower(matches[4])
 			host := ""
 			if strings.HasSuffix(username, "$") {
 				host = strings.TrimSuffix(username, "$")
+			} else if inLocalSAMSection {
+				host = target
 			}
 
 			req := CreateCredentialRequest{
@@ -177,7 +188,7 @@ func parseSecretsdumpCredentials(output string, fallbackDomain string, target st
 		}
 
 		if matches := aesDumpPattern.FindStringSubmatch(line); matches != nil {
-			accountDomain, username := splitDumpAccount(matches[1], fallbackDomain)
+			accountDomain, username := splitDumpAccount(matches[1], fallbackDomain, false)
 			algorithm := matches[2]
 			key := strings.ToLower(matches[3])
 			host := ""
@@ -203,12 +214,15 @@ func parseSecretsdumpCredentials(output string, fallbackDomain string, target st
 	return credentials
 }
 
-func splitDumpAccount(account string, fallbackDomain string) (string, string) {
+func splitDumpAccount(account string, fallbackDomain string, localAccount bool) (string, string) {
 	account = strings.TrimSpace(account)
 	for _, separator := range []string{"\\", "/"} {
 		if parts := strings.SplitN(account, separator, 2); len(parts) == 2 {
 			return parts[0], parts[1]
 		}
+	}
+	if localAccount {
+		return "", account
 	}
 	return fallbackDomain, account
 }

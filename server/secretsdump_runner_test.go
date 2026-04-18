@@ -37,6 +37,36 @@ CORP\Administrator:aes128-cts-hmac-sha1-96:00112233445566778899aabbccddeeff
 	}
 }
 
+func TestParseSecretsdumpKeepsLocalSAMAccountsLocal(t *testing.T) {
+	output := `
+[*] Dumping local SAM hashes (uid:rid:lmhash:nthash)
+Administrator:500:aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111:::
+Guest:501:aad3b435b51404eeaad3b435b51404ee:22222222222222222222222222222222:::
+DefaultAccount:503:aad3b435b51404eeaad3b435b51404ee:33333333333333333333333333333333:::
+[*] Dumping Domain Credentials (domain\uid:rid:lmhash:nthash)
+CORP\Administrator:500:aad3b435b51404eeaad3b435b51404ee:44444444444444444444444444444444:::
+`
+
+	credentials := parseSecretsdumpCredentials(output, "CORP", "10.0.0.5")
+	if len(credentials) != 4 {
+		t.Fatalf("expected 4 credentials, got %d", len(credentials))
+	}
+
+	for i, credential := range credentials[:3] {
+		if credential.Domain != "" {
+			t.Fatalf("expected local SAM credential %d to have no domain, got %+v", i, credential)
+		}
+		if credential.Host != "10.0.0.5" {
+			t.Fatalf("expected local SAM credential %d host to be target, got %+v", i, credential)
+		}
+	}
+
+	domainCredential := credentials[3]
+	if domainCredential.Domain != "CORP" {
+		t.Fatalf("expected domain credential to keep CORP domain, got %+v", domainCredential)
+	}
+}
+
 func TestSecretsdumpCommandArgsRejectsIPForKerberos(t *testing.T) {
 	_, _, err := secretsdumpCommandArgs(RunSecretsdumpRequest{
 		Target:           "10.0.0.5",

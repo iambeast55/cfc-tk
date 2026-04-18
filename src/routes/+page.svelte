@@ -431,6 +431,14 @@
       .filter(Boolean)
       .join(" / ");
 
+  const credentialSelectLabel = (credential: Credential) =>
+    [
+      credentialIdentity(credential),
+      credential.secretType,
+      credentialSecretHint(credential),
+      `added ${credentialAddedLabel(credential)}`
+    ].join(" / ");
+
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
     return body.trim() || fallback;
@@ -1991,11 +1999,11 @@
             </p>
 
             <div class="mt-6 grid gap-3">
-              <label class="grid gap-2">
+              <label class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
                 <select
                   bind:value={easyMode.teamName}
-                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  class="w-full min-w-0 max-w-full truncate rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
                   disabled={teams.length === 0 || easyRunning}
                 >
                   {#each teams as team (team.name)}
@@ -2004,11 +2012,11 @@
                 </select>
               </label>
 
-              <label class="grid gap-2">
+              <label class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Domain controller</span>
                 <select
                   bind:value={easyMode.dcTargetId}
-                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  class="w-full min-w-0 max-w-full truncate rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
                   disabled={easyTargets.length === 0 || easyRunning}
                 >
                   <option class="bg-[#0d1316]" value="">Pick DC</option>
@@ -2020,28 +2028,28 @@
                 </select>
               </label>
 
-              <label class="grid gap-2">
+              <label class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential</span>
                 <select
                   bind:value={easyMode.credentialId}
-                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  class="w-full min-w-0 max-w-full truncate rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
                   disabled={easyCredentialOptions.length === 0 || easyRunning}
                 >
                   <option class="bg-[#0d1316]" value="">Pick credential</option>
                   {#each easyCredentialOptions as credential (credential.id)}
                     <option class="bg-[#0d1316]" value={String(credential.id)}>
-                      {credentialPickerLabel(credential)}
+                      {credentialSelectLabel(credential)}
                     </option>
                   {/each}
                 </select>
                 <span class="text-xs text-white/35">Newest credentials are listed first, with short hash/key fingerprints.</span>
               </label>
 
-              <label class="grid gap-2">
+              <label class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Shell target</span>
                 <select
                   bind:value={easyMode.shellTargetId}
-                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  class="w-full min-w-0 max-w-full truncate rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
                   disabled={easyTargets.length === 0 || easyRunning}
                 >
                   <option class="bg-[#0d1316]" value="">Pick target</option>
