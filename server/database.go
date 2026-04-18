@@ -386,6 +386,19 @@ func CreateCredentialIfMissing(teamName string, req CreateCredentialRequest) (*C
 	return CreateCredential(teamName, req)
 }
 
+func DeleteCredentialsByTeamName(teamName string) (int64, error) {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return 0, err
+	}
+
+	result, err := db.Exec("DELETE FROM credentials WHERE team_name = ?", teamName)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
+}
+
 func FindCredentialByIdentity(teamName string, req CreateCredentialRequest) (*Credential, error) {
 	var id int
 	err := db.QueryRow(`
@@ -599,6 +612,27 @@ func CreateTarget(teamName string, req CreateTargetRequest) (*Target, error) {
 	}
 
 	return GetTargetByID(int(id))
+}
+
+func DeleteTargetByID(teamName string, id int) error {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return err
+	}
+
+	result, err := db.Exec("DELETE FROM targets WHERE team_name = ? AND id = ?", teamName, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
 
 func GetTargetByID(id int) (*Target, error) {

@@ -159,6 +159,7 @@
   let targetsLoading = $state(false);
   let targetError = $state("");
   let targetBusy = $state(false);
+  let targetDeletingId = $state<number | null>(null);
   let lastLoadedTargetTeam = $state("");
   let targetForm = $state<TargetForm>({
     hostname: "",
@@ -218,6 +219,7 @@
   let credentialsLoading = $state(false);
   let credentialsError = $state("");
   let credentialBusy = $state(false);
+  let credentialsClearing = $state(false);
   let credentialForm = $state<CredentialForm>({
     os: "windows",
     username: "",
@@ -788,6 +790,40 @@
     }
   };
 
+  const handleClearCredentials = async () => {
+    credentialsError = "";
+
+    if (!selectedCredentialTeam) {
+      credentialsError = "Select a team first.";
+      return;
+    }
+
+    const confirmed = confirm(`Clear all credentials for ${selectedCredentialTeam}?`);
+    if (!confirmed) return;
+
+    credentialsClearing = true;
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(selectedCredentialTeam)}/credentials`,
+        { method: "DELETE" }
+      );
+
+      if (!response.ok) {
+        credentialsError = await readError(response, "Could not clear credentials.");
+        return;
+      }
+
+      credentials = [];
+      if (commandForm.teamName === selectedCredentialTeam) {
+        commandCredentials = [];
+      }
+    } catch (error) {
+      credentialsError = error instanceof Error ? error.message : "Could not clear credentials.";
+    } finally {
+      credentialsClearing = false;
+    }
+  };
+
   const handleAddDomain = async (event: SubmitEvent) => {
     event.preventDefault();
     domainError = "";
@@ -900,6 +936,43 @@
       targetError = error instanceof Error ? error.message : "Could not add target.";
     } finally {
       targetBusy = false;
+    }
+  };
+
+  const handleDeleteTarget = async (target: Target) => {
+    targetError = "";
+
+    if (!selectedTeam) {
+      targetError = "Select a team first.";
+      return;
+    }
+
+    const confirmed = confirm(`Delete target ${target.hostname} (${target.ip})?`);
+    if (!confirmed) return;
+
+    targetDeletingId = target.id;
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(selectedTeam)}/targets/${target.id}`,
+        { method: "DELETE" }
+      );
+
+      if (!response.ok) {
+        targetError = await readError(response, "Could not delete target.");
+        return;
+      }
+
+      await loadTargets(selectedTeam);
+      if (commandForm.teamName === selectedTeam) {
+        await loadCommandTargets(selectedTeam);
+      }
+      if (commandForm.targetId === String(target.id)) {
+        commandForm = { ...commandForm, targetId: "", manualTarget: "" };
+      }
+    } catch (error) {
+      targetError = error instanceof Error ? error.message : "Could not delete target.";
+    } finally {
+      targetDeletingId = null;
     }
   };
 
@@ -1299,13 +1372,14 @@
                       <h3 class="font-semibold text-white">{group.name}</h3>
                     </div>
                     <div class="overflow-x-auto">
-                      <table class="w-full min-w-[680px] border-collapse text-left text-sm">
+                      <table class="w-full min-w-[760px] border-collapse text-left text-sm">
                         <thead class="text-xs uppercase tracking-[0.18em] text-white/45">
                           <tr>
                             <th class="px-4 py-3 font-semibold">Hostname</th>
                             <th class="px-4 py-3 font-semibold">IP</th>
                             <th class="px-4 py-3 font-semibold">OS</th>
                             <th class="px-4 py-3 font-semibold">Domain</th>
+                            <th class="px-4 py-3 font-semibold">Actions</th>
                           </tr>
                         </thead>
                         <tbody class="divide-y divide-white/10">
@@ -1315,6 +1389,17 @@
                               <td class="px-4 py-3 font-mono text-teal-100">{target.ip}</td>
                               <td class="px-4 py-3 capitalize text-white/70">{target.os}</td>
                               <td class="px-4 py-3 text-white/60">{target.domainName || "Standalone"}</td>
+                              <td class="px-4 py-3">
+                                <button
+                                  type="button"
+                                  class="inline-flex items-center gap-2 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:border-rose-200/45 hover:bg-rose-300/15 disabled:cursor-not-allowed disabled:opacity-60"
+                                  disabled={targetDeletingId === target.id}
+                                  onclick={() => handleDeleteTarget(target)}
+                                >
+                                  <Trash2 class="h-3.5 w-3.5" />
+                                  {targetDeletingId === target.id ? "Deleting" : "Delete"}
+                                </button>
+                              </td>
                             </tr>
                           {/each}
                         </tbody>
@@ -2077,8 +2162,19 @@
                   {selectedCredentialTeam || "No team selected"}
                 </h2>
               </div>
-              <div class="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">
-                {credentials.length} entries
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">
+                  {credentials.length} entries
+                </div>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:border-rose-200/45 hover:bg-rose-300/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!selectedCredentialTeam || credentials.length === 0 || credentialsClearing}
+                  onclick={handleClearCredentials}
+                >
+                  <Trash2 class="h-4 w-4" />
+                  {credentialsClearing ? "Clearing..." : "Clear all"}
+                </button>
               </div>
             </div>
 

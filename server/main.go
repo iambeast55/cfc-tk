@@ -34,6 +34,7 @@ func main() {
 	router.HandleFunc("/api/teams/{name}", deleteTeam).Methods("DELETE")
 	router.HandleFunc("/api/teams/{name}/credentials", getCredentials).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/credentials", createCredential).Methods("POST")
+	router.HandleFunc("/api/teams/{name}/credentials", deleteCredentials).Methods("DELETE")
 	router.HandleFunc("/api/teams/{name}/secretsdump/run", runSecretsdump).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/kerberos-caches", getKerberosCaches).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/kerberos-caches", createKerberosCache).Methods("POST")
@@ -42,6 +43,7 @@ func main() {
 	router.HandleFunc("/api/teams/{name}/domains", createDomain).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/targets", getTargets).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/targets", createTarget).Methods("POST")
+	router.HandleFunc("/api/teams/{name}/targets/{id}", deleteTarget).Methods("DELETE")
 
 	// Health check
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

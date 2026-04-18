@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -230,6 +231,28 @@ func createCredential(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(credential)
+}
+
+func deleteCredentials(w http.ResponseWriter, r *http.Request) {
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	deleted, err := DeleteCredentialsByTeamName(teamName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error deleting credentials: %v", err)
+		http.Error(w, "Failed to clear credentials", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Cleared %d credentials for team %s", deleted, teamName)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func runSecretsdump(w http.ResponseWriter, r *http.Request) {
@@ -515,4 +538,31 @@ func createTarget(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(target)
+}
+
+func deleteTarget(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	teamName := vars["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	targetID, err := strconv.Atoi(vars["id"])
+	if err != nil || targetID <= 0 {
+		http.Error(w, "Target id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := DeleteTargetByID(teamName, targetID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team or target not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error deleting target: %v", err)
+		http.Error(w, "Failed to delete target", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
