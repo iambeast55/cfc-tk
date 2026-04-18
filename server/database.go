@@ -75,6 +75,22 @@ func initDB() error {
 	if err := ensureCredentialColumn("rid", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
+	if _, err = db.Exec(`
+		DELETE FROM credentials
+		WHERE id NOT IN (
+			SELECT MIN(id)
+			FROM credentials
+			GROUP BY team_name, username, secret_type, secret, rid, domain, host, ip
+		);
+	`); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_unique_secret
+		ON credentials (team_name, username, secret_type, secret, rid, domain, host, ip);
+	`); err != nil {
+		return err
+	}
 
 	createDomainsTableSQL := `
 	CREATE TABLE IF NOT EXISTS domains (
@@ -322,6 +338,9 @@ func CreateCredential(teamName string, req CreateCredentialRequest) (*Credential
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, teamName, req.OS, req.Username, req.SecretType, req.Secret, req.RID, req.Domain, req.Host, req.IP)
 	if err != nil {
+		if existing, existingErr := FindCredentialByIdentity(teamName, req); existingErr == nil {
+			return existing, nil
+		}
 		return nil, err
 	}
 
@@ -356,6 +375,18 @@ func CreateCredential(teamName string, req CreateCredentialRequest) (*Credential
 }
 
 func CreateCredentialIfMissing(teamName string, req CreateCredentialRequest) (*Credential, error) {
+	credential, err := FindCredentialByIdentity(teamName, req)
+	if err == nil {
+		return credential, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	return CreateCredential(teamName, req)
+}
+
+func FindCredentialByIdentity(teamName string, req CreateCredentialRequest) (*Credential, error) {
 	var id int
 	err := db.QueryRow(`
 		SELECT id
@@ -363,14 +394,11 @@ func CreateCredentialIfMissing(teamName string, req CreateCredentialRequest) (*C
 		WHERE team_name = ? AND username = ? AND secret_type = ? AND secret = ?
 			AND rid = ? AND domain = ? AND host = ? AND ip = ?
 	`, teamName, req.Username, req.SecretType, req.Secret, req.RID, req.Domain, req.Host, req.IP).Scan(&id)
-	if err == nil {
-		return GetCredentialByID(id)
-	}
-	if err != sql.ErrNoRows {
+	if err != nil {
 		return nil, err
 	}
 
-	return CreateCredential(teamName, req)
+	return GetCredentialByID(id)
 }
 
 func GetCredentialByID(id int) (*Credential, error) {

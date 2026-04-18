@@ -217,7 +217,7 @@ func createCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	credential, err := CreateCredential(teamName, req)
+	credential, err := CreateCredentialIfMissing(teamName, req)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Team not found", http.StatusNotFound)

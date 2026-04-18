@@ -1980,7 +1980,7 @@
             </div>
 
             <div class="mt-5 overflow-x-auto rounded-md border border-white/10">
-              <table class="w-full min-w-[980px] border-collapse text-left text-sm">
+              <table class="w-full min-w-[1080px] border-collapse text-left text-sm">
                 <thead class="bg-white/[0.045] text-xs uppercase tracking-[0.18em] text-white/45">
                   <tr>
                     <th class="px-3 py-3 font-semibold">OS</th>
@@ -1991,16 +1991,17 @@
                     <th class="px-3 py-3 font-semibold">Domain</th>
                     <th class="px-3 py-3 font-semibold">Host</th>
                     <th class="px-3 py-3 font-semibold">IP</th>
+                    <th class="px-3 py-3 font-semibold">Added</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-white/10">
                   {#if credentialsLoading}
                     <tr>
-                      <td class="px-3 py-6 text-white/55" colspan="8">Loading credentials...</td>
+                      <td class="px-3 py-6 text-white/55" colspan="9">Loading credentials...</td>
                     </tr>
                   {:else if credentials.length === 0}
                     <tr>
-                      <td class="px-3 py-6 text-white/55" colspan="8">No credentials for this team yet.</td>
+                      <td class="px-3 py-6 text-white/55" colspan="9">No credentials for this team yet.</td>
                     </tr>
                   {:else}
                     {#each credentials as credential (credential.id)}
@@ -2015,6 +2016,7 @@
                         <td class="px-3 py-3 text-white/60">{credential.domain || "-"}</td>
                         <td class="px-3 py-3 text-white/60">{credential.host || "-"}</td>
                         <td class="px-3 py-3 text-white/60">{credential.ip || "-"}</td>
+                        <td class="px-3 py-3 text-xs text-white/45">{credential.createdAt}</td>
                       </tr>
                     {/each}
                   {/if}
