@@ -97,6 +97,12 @@
     credentials: Credential[];
   }
 
+  interface LaunchInteractiveCommandResponse {
+    command: string[];
+    terminal: string;
+    title: string;
+  }
+
   interface TargetForm {
     hostname: string;
     ip: string;
@@ -108,11 +114,12 @@
 
   interface CommandForm {
     teamName: string;
-    commandKind: "secretsdump" | "getTGT" | "ticketer";
+    commandKind: "secretsdump" | "getTGT" | "ticketer" | "wmiexec";
     impacketStyle: "kali" | "pythonScripts" | "custom";
     customSecretsdump: string;
     customGetTGT: string;
     customTicketer: string;
+    customWmiexec: string;
     targetId: string;
     manualTarget: string;
     authMode: "password" | "hash" | "kerberos";
@@ -139,7 +146,7 @@
   }
 
   type TabId = "main" | "command" | "notes" | "credentials";
-  type ImpacketTool = "secretsdump" | "getTGT" | "ticketer";
+  type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-tk.impacketCustomTools";
@@ -190,6 +197,7 @@
     customSecretsdump: "",
     customGetTGT: "",
     customTicketer: "",
+    customWmiexec: "",
     targetId: "",
     manualTarget: "",
     authMode: "password",
@@ -262,9 +270,15 @@
     }
     return hostname;
   });
+  const isInteractiveCommand = $derived(commandForm.commandKind === "wmiexec");
+  const usesTarget = $derived(commandForm.commandKind === "secretsdump" || isInteractiveCommand);
+  const selectedCommandTargetLabel = $derived.by(() => {
+    if (commandForm.targetId === "manual") return commandForm.manualTarget.trim();
+    return selectedCommandTarget?.hostname || selectedCommandTarget?.ip || "";
+  });
   const commandTargetAddress = $derived.by(() => {
     if (commandForm.targetId === "manual") return commandForm.manualTarget.trim();
-    if (commandForm.commandKind === "secretsdump" && commandForm.authMode === "kerberos") {
+    if (usesTarget && commandForm.authMode === "kerberos") {
       return selectedKerberosTargetName;
     }
     return selectedCommandTarget?.ip || selectedCommandTarget?.hostname || "";
@@ -318,7 +332,8 @@
     if (commandForm.impacketStyle !== "custom") return defaultImpacketToolName(tool);
     if (tool === "secretsdump") return commandForm.customSecretsdump.trim() || "impacket-secretsdump";
     if (tool === "getTGT") return commandForm.customGetTGT.trim() || "impacket-getTGT";
-    return commandForm.customTicketer.trim() || "impacket-ticketer";
+    if (tool === "ticketer") return commandForm.customTicketer.trim() || "impacket-ticketer";
+    return commandForm.customWmiexec.trim() || "impacket-wmiexec";
   };
 
   const safePathPart = (value: string, fallback: string) =>
@@ -431,13 +446,13 @@
 
     if (!target) return "Select a target or enter a manual target.";
 
-    const args = [impacketToolName("secretsdump")];
+    const args = [impacketToolName(commandForm.commandKind)];
 
-    if (commandForm.justDc) {
+    if (commandForm.commandKind === "secretsdump" && commandForm.justDc) {
       args.push("-just-dc");
     }
 
-    if (commandForm.useVss) {
+    if (commandForm.commandKind === "secretsdump" && commandForm.useVss) {
       args.push("-use-vss");
     }
 
@@ -666,7 +681,8 @@
       JSON.stringify({
         secretsdump: commandForm.customSecretsdump,
         getTGT: commandForm.customGetTGT,
-        ticketer: commandForm.customTicketer
+        ticketer: commandForm.customTicketer,
+        wmiexec: commandForm.customWmiexec
       })
     );
   });
@@ -685,7 +701,8 @@
           ...commandForm,
           customSecretsdump: customTools.secretsdump ?? commandForm.customSecretsdump,
           customGetTGT: customTools.getTGT ?? commandForm.customGetTGT,
-          customTicketer: customTools.ticketer ?? commandForm.customTicketer
+          customTicketer: customTools.ticketer ?? commandForm.customTicketer,
+          customWmiexec: customTools.wmiexec ?? commandForm.customWmiexec
         };
       } catch {
         localStorage.removeItem(IMPACKET_CUSTOM_TOOLS_KEY);
@@ -1237,6 +1254,68 @@
       commandRunning = false;
     }
   };
+
+  const handleLaunchInteractiveCommand = async () => {
+    commandError = "";
+    commandRunOutput = "";
+
+    const target = commandTargetAddress;
+    if (!commandForm.teamName) {
+      commandError = "Select a team first.";
+      return;
+    }
+    if (commandForm.commandKind !== "wmiexec") {
+      commandError = "Switch to wmiexec before launching an interactive terminal.";
+      return;
+    }
+    if (!target) {
+      commandError = "Select a target or enter a manual target.";
+      return;
+    }
+    if (!commandForm.username.trim()) {
+      commandError = "Username is required.";
+      return;
+    }
+
+    commandRunning = true;
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(commandForm.teamName)}/interactive/launch`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commandKind: commandForm.commandKind,
+            toolCommand: impacketToolName("wmiexec"),
+            target,
+            targetLabel: selectedCommandTargetLabel,
+            domain: commandForm.domain.trim(),
+            username: commandForm.username.trim(),
+            authMode: commandForm.authMode,
+            password: commandForm.password,
+            lmHash: commandForm.lmHash.trim(),
+            ntHash: commandForm.ntHash.trim(),
+            aesKey: commandForm.aesKey.trim(),
+            kdcHost: commandForm.kdcHost.trim(),
+            useKerberosCache: commandForm.useKerberosCache,
+            cachePath: kerberosCachePath
+          })
+        }
+      );
+
+      if (!response.ok) {
+        commandError = await readError(response, "Could not launch wmiexec.");
+        return;
+      }
+
+      const result = (await response.json()) as LaunchInteractiveCommandResponse;
+      commandRunOutput = `Launched ${result.title} in ${result.terminal}. cfc-tk is not tracking this shell.`;
+    } catch (error) {
+      commandError = error instanceof Error ? error.message : "Could not launch wmiexec.";
+    } finally {
+      commandRunning = false;
+    }
+  };
 </script>
 
 <svelte:head>
@@ -1557,7 +1636,7 @@
             <Radar class="h-6 w-6 text-teal-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Command</h2>
             <p class="mt-2 text-sm leading-6 text-white/60">
-              Build common Impacket commands from known teams and targets. Execution is not wired yet; this generates a local command preview.
+              Build common Impacket commands from known teams, targets, tickets, and credentials.
             </p>
 
             <div class="mt-6 grid gap-3">
@@ -1581,6 +1660,7 @@
                   class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-teal-200/45"
                 >
                   <option class="bg-[#0d1316]" value="secretsdump">Credential dump: secretsdump</option>
+                  <option class="bg-[#0d1316]" value="wmiexec">Interactive shell: wmiexec</option>
                   <option class="bg-[#0d1316]" value="getTGT">Kerberos cache: getTGT</option>
                   <option class="bg-[#0d1316]" value="ticketer">Kerberos cache: ticketer</option>
                 </select>
@@ -1599,7 +1679,7 @@
               </label>
 
               {#if commandForm.impacketStyle === "custom"}
-                <div class="grid min-w-0 gap-3 2xl:grid-cols-3">
+                <div class="grid min-w-0 gap-3 2xl:grid-cols-4">
                   <label class="grid min-w-0 gap-2">
                     <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">secretsdump</span>
                     <input
@@ -1624,10 +1704,18 @@
                       placeholder="ticketer.py"
                     />
                   </label>
+                  <label class="grid min-w-0 gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">wmiexec</span>
+                    <input
+                      bind:value={commandForm.customWmiexec}
+                      class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                      placeholder="impacket-wmiexec"
+                    />
+                  </label>
                 </div>
               {/if}
 
-              {#if commandForm.commandKind === "secretsdump"}
+              {#if usesTarget}
                 <label class="grid gap-2">
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Target</span>
                   <select
@@ -1659,7 +1747,7 @@
               <div class="grid min-w-0 gap-3">
                 <label class="grid min-w-0 gap-2">
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Auth</span>
-                  {#if commandForm.commandKind === "secretsdump"}
+                  {#if usesTarget}
                     <select
                       bind:value={commandForm.authMode}
                       class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-teal-200/45"
@@ -1814,7 +1902,7 @@
                     placeholder="stored only in this form"
                   />
                 </label>
-              {:else if (commandForm.commandKind === "secretsdump" && commandForm.authMode === "password")}
+              {:else if usesTarget && commandForm.authMode === "password"}
                 <label class="grid gap-2">
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Password</span>
                   <input
@@ -1824,7 +1912,7 @@
                     placeholder="stored only in this form"
                   />
                 </label>
-              {:else if (commandForm.commandKind === "getTGT" && commandForm.ticketAuthMode === "hash") || (commandForm.commandKind === "secretsdump" && commandForm.authMode === "hash")}
+              {:else if (commandForm.commandKind === "getTGT" && commandForm.ticketAuthMode === "hash") || (usesTarget && commandForm.authMode === "hash")}
                 <div class="grid min-w-0 gap-3 2xl:grid-cols-2">
                   <label class="grid min-w-0 gap-2">
                     <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">LM hash</span>
@@ -1853,7 +1941,7 @@
                     placeholder="user account AES key"
                   />
                 </label>
-              {:else if commandForm.commandKind === "secretsdump" && commandForm.authMode === "kerberos"}
+              {:else if usesTarget && commandForm.authMode === "kerberos"}
                 <div class="grid gap-3">
                   <label class="flex items-center gap-3 rounded-md border border-white/10 bg-black/20 px-3 py-3 text-sm text-white/70">
                     <input bind:checked={commandForm.useKerberosCache} type="checkbox" class="h-4 w-4 accent-teal-200" />
@@ -1921,6 +2009,10 @@
                   <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleRunSecretsdump}>
                     {commandRunning ? "Running..." : "Run and import"}
                   </Button>
+                {:else if commandForm.commandKind === "wmiexec"}
+                  <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleLaunchInteractiveCommand}>
+                    {commandRunning ? "Launching..." : "Launch terminal"}
+                  </Button>
                 {:else if commandForm.commandKind === "getTGT" || commandForm.commandKind === "ticketer"}
                   <Button type="button" disabled={commandRunning} class="bg-lime-200 text-slate-950 hover:bg-lime-100" onclick={handleRunKerberosTicket}>
                     {commandRunning ? "Running..." : "Run and save"}
@@ -1964,6 +2056,16 @@
                   <span class="font-semibold text-white/80">Kerberos</span>
                   uses a selected or exported cache with <code class="rounded bg-black/30 px-1 text-teal-100">-k -no-pass</code>.
                   Use a hostname or FQDN target; keep the DC IP in <code class="rounded bg-black/30 px-1 text-teal-100">-dc-ip</code>.
+                </p>
+              {:else if commandForm.commandKind === "wmiexec"}
+                <p>
+                  <span class="font-semibold text-white/80">wmiexec</span>
+                  opens a local Linux terminal titled <code class="rounded bg-black/30 px-1 text-teal-100">team:box</code>.
+                  cfc-tk hands off the shell and does not capture its output.
+                </p>
+                <p>
+                  <span class="font-semibold text-white/80">Kerberos</span>
+                  should use a hostname or FQDN target. Use <code class="rounded bg-black/30 px-1 text-teal-100">-dc-ip</code> for the KDC.
                 </p>
               {:else if commandForm.commandKind === "getTGT"}
                 <p>

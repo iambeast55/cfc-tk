@@ -36,6 +36,7 @@ func main() {
 	router.HandleFunc("/api/teams/{name}/credentials", createCredential).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/credentials", deleteCredentials).Methods("DELETE")
 	router.HandleFunc("/api/teams/{name}/secretsdump/run", runSecretsdump).Methods("POST")
+	router.HandleFunc("/api/teams/{name}/interactive/launch", launchInteractiveCommand).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/kerberos-caches", getKerberosCaches).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/kerberos-caches", createKerberosCache).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/kerberos-caches/run", runKerberosTicket).Methods("POST")

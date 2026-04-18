@@ -168,3 +168,26 @@ type RunSecretsdumpResponse struct {
 	Output      string       `json:"output"`
 	Credentials []Credential `json:"credentials"`
 }
+
+type LaunchInteractiveCommandRequest struct {
+	CommandKind      string `json:"commandKind"`
+	ToolCommand      string `json:"toolCommand"`
+	Target           string `json:"target"`
+	TargetLabel      string `json:"targetLabel"`
+	Domain           string `json:"domain"`
+	Username         string `json:"username"`
+	AuthMode         string `json:"authMode"`
+	Password         string `json:"password"`
+	LMHash           string `json:"lmHash"`
+	NTHash           string `json:"ntHash"`
+	AESKey           string `json:"aesKey"`
+	KDCHost          string `json:"kdcHost"`
+	UseKerberosCache bool   `json:"useKerberosCache"`
+	CachePath        string `json:"cachePath"`
+}
+
+type LaunchInteractiveCommandResponse struct {
+	Command  []string `json:"command"`
+	Terminal string   `json:"terminal"`
+	Title    string   `json:"title"`
+}
