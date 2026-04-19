@@ -160,6 +160,7 @@
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-tk.impacketCustomTools";
+  const CREDENTIALS_PAGE_SIZE = 20;
   const credentialScopeFilters = ["users", "all", "domain", "local", "machines"] as const;
   const credentialTypeFilters = ["all", "ntlm", "password", "aes"] as const;
 
@@ -199,6 +200,9 @@
   let commandRunOutput = $state("");
   let commandError = $state("");
   let commandCopied = $state(false);
+  let commandCredentialPickerOpen = $state(false);
+  let commandCredentialSearch = $state("");
+  let commandCredentialScopeFilter = $state<"users" | "all" | "domain" | "local" | "machines">("users");
   let lastLoadedCommandTeam = $state("");
   let easyTargets = $state<Target[]>([]);
   let easyCredentials = $state<Credential[]>([]);
@@ -254,6 +258,8 @@
   let credentialsError = $state("");
   let credentialBusy = $state(false);
   let credentialsClearing = $state(false);
+  let credentialsSearch = $state("");
+  let credentialsPage = $state(1);
   let credentialForm = $state<CredentialForm>({
     os: "windows",
     username: "",
@@ -372,6 +378,33 @@
 
       return typeMatches && scopeMatches && (!search || credentialSearchText(credential).includes(search));
     });
+  });
+  const filteredCommandCredentialOptions = $derived.by(() => {
+    const search = commandCredentialSearch.trim().toLowerCase();
+
+    return commandCredentialOptions.filter((credential) => {
+      const isMachine = credential.username.endsWith("$");
+      const isDomain = Boolean(credential.domain);
+      const scopeMatches =
+        commandCredentialScopeFilter === "all" ||
+        (commandCredentialScopeFilter === "users" && !isMachine) ||
+        (commandCredentialScopeFilter === "domain" && isDomain) ||
+        (commandCredentialScopeFilter === "local" && !isDomain) ||
+        (commandCredentialScopeFilter === "machines" && isMachine);
+
+      return scopeMatches && (!search || credentialSearchText(credential).includes(search));
+    });
+  });
+  const filteredCredentials = $derived.by(() => {
+    const search = credentialsSearch.trim().toLowerCase();
+    if (!search) return credentials;
+    return credentials.filter((credential) => credentialSearchText(credential).includes(search));
+  });
+  const credentialsTotalPages = $derived(Math.max(1, Math.ceil(filteredCredentials.length / CREDENTIALS_PAGE_SIZE)));
+  const normalizedCredentialsPage = $derived(Math.min(credentialsPage, credentialsTotalPages));
+  const pagedCredentials = $derived.by(() => {
+    const start = (normalizedCredentialsPage - 1) * CREDENTIALS_PAGE_SIZE;
+    return filteredCredentials.slice(start, start + CREDENTIALS_PAGE_SIZE);
   });
   const targetFqdn = (target: Target | undefined) => {
     if (!target) return "";
@@ -908,7 +941,15 @@
     if (!selectedCredentialTeam) return;
     if (selectedCredentialTeam === lastLoadedCredentialTeam) return;
     lastLoadedCredentialTeam = selectedCredentialTeam;
+    credentialsPage = 1;
+    credentialsSearch = "";
     void loadCredentials(selectedCredentialTeam);
+  });
+
+  $effect(() => {
+    credentialsSearch;
+    selectedCredentialTeam;
+    credentialsPage = 1;
   });
 
   $effect(() => {
@@ -2387,25 +2428,13 @@
                 {:else if commandCredentialOptions.length === 0}
                   <p class="text-sm text-white/45">No saved credentials match this command and auth mode.</p>
                 {:else}
-                  <div class="grid gap-2">
-                    {#each commandCredentialOptions as credential (credential.id)}
-                      <button
-                        type="button"
-                        class="rounded-md border border-white/10 bg-white/[0.035] px-3 py-2 text-left text-sm transition hover:border-teal-300/45 hover:bg-teal-300/10"
-                        onclick={() => handleUseCredential(credential)}
-                      >
-                        <span class="block font-mono text-teal-100">
-                          {credentialIdentity(credential)}
-                        </span>
-                        <span class="mt-1 block text-xs text-white/45">
-                          {credential.secretType} / {credentialSecretHint(credential)} / added {credentialAddedLabel(credential)}
-                        </span>
-                        {#if credentialContextLabel(credential)}
-                          <span class="mt-1 block text-xs text-white/35">{credentialContextLabel(credential)}</span>
-                        {/if}
-                      </button>
-                    {/each}
-                  </div>
+                  <Button
+                    type="button"
+                    class="w-fit bg-teal-200 text-slate-950 hover:bg-teal-100"
+                    onclick={() => (commandCredentialPickerOpen = true)}
+                  >
+                    Choose credential
+                  </Button>
                 {/if}
               </div>
 
@@ -2857,7 +2886,7 @@
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <div class="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">
-                  {credentials.length} entries
+                  {filteredCredentials.length} / {credentials.length} entries
                 </div>
                 <button
                   type="button"
@@ -2868,6 +2897,17 @@
                   <Trash2 class="h-4 w-4" />
                   {credentialsClearing ? "Clearing..." : "Clear all"}
                 </button>
+              </div>
+            </div>
+
+            <div class="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+              <input
+                bind:value={credentialsSearch}
+                class="w-full min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-rose-200/45"
+                placeholder="Search credentials by user, domain, type, RID, host, IP, hash suffix"
+              />
+              <div class="flex items-center gap-2 text-sm text-white/55">
+                <span>Page {normalizedCredentialsPage} of {credentialsTotalPages}</span>
               </div>
             </div>
 
@@ -2895,8 +2935,12 @@
                     <tr>
                       <td class="px-3 py-6 text-white/55" colspan="9">No credentials for this team yet.</td>
                     </tr>
+                  {:else if filteredCredentials.length === 0}
+                    <tr>
+                      <td class="px-3 py-6 text-white/55" colspan="9">No credentials match that search.</td>
+                    </tr>
                   {:else}
-                    {#each credentials as credential (credential.id)}
+                    {#each pagedCredentials as credential (credential.id)}
                       <tr class="align-top transition hover:bg-white/[0.035]">
                         <td class="px-3 py-3 capitalize text-white/75">{credential.os}</td>
                         <td class="px-3 py-3 font-medium text-white">{credential.username}</td>
@@ -2914,6 +2958,30 @@
                   {/if}
                 </tbody>
               </table>
+            </div>
+
+            <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p class="text-sm text-white/45">
+                Showing {pagedCredentials.length} of {filteredCredentials.length} matching credentials.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  disabled={normalizedCredentialsPage <= 1}
+                  class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                  onclick={() => (credentialsPage = Math.max(1, normalizedCredentialsPage - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  disabled={normalizedCredentialsPage >= credentialsTotalPages}
+                  class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                  onclick={() => (credentialsPage = Math.min(credentialsTotalPages, normalizedCredentialsPage + 1))}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           </div>
         </section>
@@ -2997,6 +3065,80 @@
                     onclick={() => {
                       easyMode = { ...easyMode, credentialId: String(credential.id) };
                       easyCredentialPickerOpen = false;
+                    }}
+                  >
+                    <span class="block truncate font-mono text-sm text-teal-100">{credentialIdentity(credential)}</span>
+                    <span class="mt-1 block text-xs text-white/50">
+                      {credential.secretType} / {credentialSecretHint(credential)} / added {credentialAddedLabel(credential)}
+                    </span>
+                    {#if credentialContextLabel(credential)}
+                      <span class="mt-1 block text-xs text-white/35">{credentialContextLabel(credential)}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if commandCredentialPickerOpen}
+      <div class="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
+        <div class="grid max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-md border border-teal-300/20 bg-[#111719]">
+          <div class="border-b border-white/10 p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/60">Command credential</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">Choose for {commandForm.commandKind}</h2>
+                <p class="mt-2 text-sm text-white/55">Search inside credentials that match the current command and auth mode.</p>
+              </div>
+              <Button
+                type="button"
+                class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                onclick={() => (commandCredentialPickerOpen = false)}
+              >
+                Close
+              </Button>
+            </div>
+
+            <div class="mt-4 grid gap-3">
+              <input
+                bind:value={commandCredentialSearch}
+                class="w-full min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                placeholder="Search user, domain, RID, host, IP, type, hash suffix"
+              />
+              <div class="flex flex-wrap gap-2">
+                {#each credentialScopeFilters as scope}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition",
+                      commandCredentialScopeFilter === scope
+                        ? "border-teal-200/60 bg-teal-200/15 text-teal-100"
+                        : "border-white/10 bg-white/[0.04] text-white/55 hover:border-teal-200/35"
+                    ]}
+                    onclick={() => (commandCredentialScopeFilter = scope)}
+                  >
+                    {scope}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          </div>
+
+          <div class="min-h-0 overflow-y-auto p-3">
+            {#if filteredCommandCredentialOptions.length === 0}
+              <p class="rounded-md border border-white/10 bg-black/20 p-5 text-sm text-white/55">No credentials match those filters.</p>
+            {:else}
+              <div class="grid gap-2">
+                {#each filteredCommandCredentialOptions as credential (credential.id)}
+                  <button
+                    type="button"
+                    class="rounded-md border border-white/10 bg-white/[0.035] px-3 py-3 text-left transition hover:border-teal-200/35 hover:bg-teal-200/10"
+                    onclick={() => {
+                      handleUseCredential(credential);
+                      commandCredentialPickerOpen = false;
                     }}
                   >
                     <span class="block truncate font-mono text-sm text-teal-100">{credentialIdentity(credential)}</span>
