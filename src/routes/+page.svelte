@@ -379,22 +379,6 @@
       return typeMatches && scopeMatches && (!search || credentialSearchText(credential).includes(search));
     });
   });
-  const filteredCommandCredentialOptions = $derived.by(() => {
-    const search = commandCredentialSearch.trim().toLowerCase();
-
-    return commandCredentialOptions.filter((credential) => {
-      const isMachine = credential.username.endsWith("$");
-      const isDomain = Boolean(credential.domain);
-      const scopeMatches =
-        commandCredentialScopeFilter === "all" ||
-        (commandCredentialScopeFilter === "users" && !isMachine) ||
-        (commandCredentialScopeFilter === "domain" && isDomain) ||
-        (commandCredentialScopeFilter === "local" && !isDomain) ||
-        (commandCredentialScopeFilter === "machines" && isMachine);
-
-      return scopeMatches && (!search || credentialSearchText(credential).includes(search));
-    });
-  });
   const filteredCredentials = $derived.by(() => {
     const search = credentialsSearch.trim().toLowerCase();
     if (!search) return credentials;
@@ -595,6 +579,22 @@
       .filter(credentialMatchesCommandAuth)
       .filter((credential) => !selectedDomain || credential.domain.toLowerCase() === selectedDomain)
       .slice(0, 50);
+  });
+  const filteredCommandCredentialOptions = $derived.by(() => {
+    const search = commandCredentialSearch.trim().toLowerCase();
+
+    return commandCredentialOptions.filter((credential) => {
+      const isMachine = credential.username.endsWith("$");
+      const isDomain = Boolean(credential.domain);
+      const scopeMatches =
+        commandCredentialScopeFilter === "all" ||
+        (commandCredentialScopeFilter === "users" && !isMachine) ||
+        (commandCredentialScopeFilter === "domain" && isDomain) ||
+        (commandCredentialScopeFilter === "local" && !isDomain) ||
+        (commandCredentialScopeFilter === "machines" && isMachine);
+
+      return scopeMatches && (!search || credentialSearchText(credential).includes(search));
+    });
   });
 
   const kerberosCachePath = $derived(commandForm.cachePath.trim() || defaultKerberosCachePath);
