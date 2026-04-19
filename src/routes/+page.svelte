@@ -1,6 +1,6 @@
 <script lang="ts">
   import logo from "$lib/assets/logo.png";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
@@ -872,19 +872,31 @@
     }
   };
 
+  const patchCommandForm = (patch: Partial<CommandForm>) => {
+    commandForm = untrack(() => ({ ...commandForm, ...patch }));
+  };
+
+  const patchEasyMode = (patch: Partial<EasyModeState>) => {
+    easyMode = untrack(() => ({ ...easyMode, ...patch }));
+  };
+
   $effect(() => {
     if (teams.length === 0) {
-      selectedTeam = "";
-      domains = [];
-      targets = [];
-      commandForm = { ...commandForm, teamName: "", targetId: "" };
-      commandTargets = [];
-      kerberosCaches = [];
-      easyMode = { teamName: "", dcTargetId: "", shellTargetId: "", credentialId: "" };
-      easyTargets = [];
-      easyCredentials = [];
-      selectedCredentialTeam = "";
-      credentials = [];
+      if (selectedTeam) selectedTeam = "";
+      if (domains.length > 0) domains = [];
+      if (targets.length > 0) targets = [];
+      if (commandForm.teamName || commandForm.targetId) {
+        patchCommandForm({ teamName: "", targetId: "" });
+      }
+      if (commandTargets.length > 0) commandTargets = [];
+      if (kerberosCaches.length > 0) kerberosCaches = [];
+      if (easyMode.teamName || easyMode.dcTargetId || easyMode.shellTargetId || easyMode.credentialId) {
+        easyMode = { teamName: "", dcTargetId: "", shellTargetId: "", credentialId: "" };
+      }
+      if (easyTargets.length > 0) easyTargets = [];
+      if (easyCredentials.length > 0) easyCredentials = [];
+      if (selectedCredentialTeam) selectedCredentialTeam = "";
+      if (credentials.length > 0) credentials = [];
       return;
     }
 
@@ -893,11 +905,11 @@
     }
 
     if (!commandForm.teamName || !teams.some((team) => team.name === commandForm.teamName)) {
-      commandForm = { ...commandForm, teamName: teams[0].name, targetId: "" };
+      patchCommandForm({ teamName: teams[0].name, targetId: "" });
     }
 
     if (!easyMode.teamName || !teams.some((team) => team.name === easyMode.teamName)) {
-      easyMode = { ...easyMode, teamName: teams[0].name, dcTargetId: "", shellTargetId: "", credentialId: "" };
+      patchEasyMode({ teamName: teams[0].name, dcTargetId: "", shellTargetId: "", credentialId: "" });
     }
 
     if (!selectedCredentialTeam || !teams.some((team) => team.name === selectedCredentialTeam)) {
@@ -922,21 +934,27 @@
   });
 
   $effect(() => {
-    if (!commandForm.teamName) return;
-    if (commandForm.teamName === lastLoadedCommandTeam) return;
-    lastLoadedCommandTeam = commandForm.teamName;
-    void loadCommandTargets(commandForm.teamName);
-    void loadKerberosCaches(commandForm.teamName);
-    void loadCommandCredentials(commandForm.teamName);
-    commandForm = { ...commandForm, targetId: "", manualTarget: "" };
+    const teamName = commandForm.teamName;
+    if (!teamName) return;
+    if (teamName === lastLoadedCommandTeam) return;
+    lastLoadedCommandTeam = teamName;
+    void loadCommandTargets(teamName);
+    void loadKerberosCaches(teamName);
+    void loadCommandCredentials(teamName);
+    if (commandForm.targetId || commandForm.manualTarget) {
+      patchCommandForm({ targetId: "", manualTarget: "" });
+    }
   });
 
   $effect(() => {
-    if (!easyMode.teamName) return;
-    if (easyMode.teamName === lastLoadedEasyTeam) return;
-    lastLoadedEasyTeam = easyMode.teamName;
-    easyMode = { ...easyMode, dcTargetId: "", shellTargetId: "", credentialId: "" };
-    void loadEasyModeData(easyMode.teamName);
+    const teamName = easyMode.teamName;
+    if (!teamName) return;
+    if (teamName === lastLoadedEasyTeam) return;
+    lastLoadedEasyTeam = teamName;
+    if (easyMode.dcTargetId || easyMode.shellTargetId || easyMode.credentialId) {
+      patchEasyMode({ dcTargetId: "", shellTargetId: "", credentialId: "" });
+    }
+    void loadEasyModeData(teamName);
   });
 
   $effect(() => {
