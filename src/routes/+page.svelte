@@ -947,12 +947,6 @@
   });
 
   $effect(() => {
-    credentialsSearch;
-    selectedCredentialTeam;
-    credentialsPage = 1;
-  });
-
-  $effect(() => {
     if (!impacketPreferenceReady) return;
     localStorage.setItem(IMPACKET_STYLE_KEY, commandForm.impacketStyle);
   });
@@ -2902,7 +2896,11 @@
 
             <div class="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <input
-                bind:value={credentialsSearch}
+                value={credentialsSearch}
+                oninput={(event) => {
+                  credentialsSearch = event.currentTarget.value;
+                  credentialsPage = 1;
+                }}
                 class="w-full min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-rose-200/45"
                 placeholder="Search credentials by user, domain, type, RID, host, IP, hash suffix"
               />
