@@ -326,6 +326,61 @@
     }
     return selectedCommandTarget?.ip || selectedCommandTarget?.hostname || "";
   });
+
+  const credentialIdentity = (credential: Credential) =>
+    `${credential.domain ? `${credential.domain}\\` : ""}${credential.username}`;
+
+  const credentialSecretHint = (credential: Credential) => {
+    if (!credential.secret) return "empty";
+    if (credential.secretType === "password") return "password";
+    if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") {
+      const parts = credential.secret.split(":");
+      const ntHash = credential.secret.includes(":") ? parts[parts.length - 1] || "" : credential.secret;
+      return `NT ...${ntHash.slice(-8)}`;
+    }
+    if (credential.secretType.includes("aes")) {
+      return `key ...${credential.secret.slice(-8)}`;
+    }
+    return `...${credential.secret.slice(-8)}`;
+  };
+
+  const credentialAddedLabel = (credential: Credential) =>
+    credential.createdAt ? credential.createdAt.replace("T", " ").replace("Z", " UTC").slice(0, 19) : "unknown";
+
+  const credentialContextLabel = (credential: Credential) =>
+    [
+      credential.rid ? `RID ${credential.rid}` : "",
+      credential.host ? `host ${credential.host}` : "",
+      credential.ip ? `ip ${credential.ip}` : ""
+    ]
+      .filter(Boolean)
+      .join(" / ");
+
+  const credentialPickerLabel = (credential: Credential) =>
+    [
+      credentialIdentity(credential),
+      credential.secretType,
+      credentialSecretHint(credential),
+      credentialContextLabel(credential),
+      `added ${credentialAddedLabel(credential)}`
+    ]
+      .filter(Boolean)
+      .join(" / ");
+
+  const credentialSearchText = (credential: Credential) =>
+    [
+      credentialIdentity(credential),
+      credential.secretType,
+      credential.secret,
+      credential.rid,
+      credential.domain,
+      credential.host,
+      credential.ip,
+      credential.createdAt
+    ]
+      .join(" ")
+      .toLowerCase();
+
   const selectedEasyDc = $derived(
     easyTargets.find((target) => String(target.id) === easyMode.dcTargetId)
   );
@@ -345,19 +400,6 @@
   const selectedEasyCredential = $derived(
     easyCredentialOptions.find((credential) => String(credential.id) === easyMode.credentialId)
   );
-  const credentialSearchText = (credential: Credential) =>
-    [
-      credentialIdentity(credential),
-      credential.secretType,
-      credential.secret,
-      credential.rid,
-      credential.domain,
-      credential.host,
-      credential.ip,
-      credential.createdAt
-    ]
-      .join(" ")
-      .toLowerCase();
   const filteredEasyCredentialOptions = $derived.by(() => {
     const search = easyCredentialSearch.trim().toLowerCase();
 
@@ -447,46 +489,6 @@
       aesKey: credential.secret
     };
   };
-
-  const credentialIdentity = (credential: Credential) =>
-    `${credential.domain ? `${credential.domain}\\` : ""}${credential.username}`;
-
-  const credentialSecretHint = (credential: Credential) => {
-    if (!credential.secret) return "empty";
-    if (credential.secretType === "password") return "password";
-    if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") {
-      const parts = credential.secret.split(":");
-      const ntHash = credential.secret.includes(":") ? parts[parts.length - 1] || "" : credential.secret;
-      return `NT ...${ntHash.slice(-8)}`;
-    }
-    if (credential.secretType.includes("aes")) {
-      return `key ...${credential.secret.slice(-8)}`;
-    }
-    return `...${credential.secret.slice(-8)}`;
-  };
-
-  const credentialAddedLabel = (credential: Credential) =>
-    credential.createdAt ? credential.createdAt.replace("T", " ").replace("Z", " UTC").slice(0, 19) : "unknown";
-
-  const credentialContextLabel = (credential: Credential) =>
-    [
-      credential.rid ? `RID ${credential.rid}` : "",
-      credential.host ? `host ${credential.host}` : "",
-      credential.ip ? `ip ${credential.ip}` : ""
-    ]
-      .filter(Boolean)
-      .join(" / ");
-
-  const credentialPickerLabel = (credential: Credential) =>
-    [
-      credentialIdentity(credential),
-      credential.secretType,
-      credentialSecretHint(credential),
-      credentialContextLabel(credential),
-      `added ${credentialAddedLabel(credential)}`
-    ]
-      .filter(Boolean)
-      .join(" / ");
 
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
