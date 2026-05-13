@@ -160,6 +160,58 @@ func deleteTeam(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func getTeamNotes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	note, err := GetTeamNoteByTeamName(teamName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching team notes: %v", err)
+		http.Error(w, "Failed to fetch team notes", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(note)
+}
+
+func saveTeamNotes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	var req SaveTeamNoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	note, err := SaveTeamNote(teamName, req)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error saving team notes: %v", err)
+		http.Error(w, "Failed to save team notes", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(note)
+}
+
 func getCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

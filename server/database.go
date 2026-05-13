@@ -48,6 +48,19 @@ func initDB() error {
 		return err
 	}
 
+	createTeamNotesTableSQL := `
+	CREATE TABLE IF NOT EXISTS team_notes (
+		team_name TEXT NOT NULL PRIMARY KEY,
+		content TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(team_name) REFERENCES teams(name) ON DELETE CASCADE
+	);
+	`
+
+	if _, err = db.Exec(createTeamNotesTableSQL); err != nil {
+		return err
+	}
+
 	createCredentialsTableSQL := `
 	CREATE TABLE IF NOT EXISTS credentials (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -286,6 +299,45 @@ func UpdateTeamByName(name string, req UpdateTeamRequest) (*Team, error) {
 func DeleteTeamByName(name string) error {
 	_, err := db.Exec("DELETE FROM teams WHERE name = ?", name)
 	return err
+}
+
+func GetTeamNoteByTeamName(teamName string) (*TeamNote, error) {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return nil, err
+	}
+
+	var note TeamNote
+	err := db.QueryRow(`
+		SELECT team_name, content, updated_at
+		FROM team_notes
+		WHERE team_name = ?
+	`, teamName).Scan(&note.TeamName, &note.Content, &note.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return &TeamNote{TeamName: teamName, Content: "", UpdatedAt: ""}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &note, nil
+}
+
+func SaveTeamNote(teamName string, req SaveTeamNoteRequest) (*TeamNote, error) {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO team_notes (team_name, content, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(team_name) DO UPDATE SET
+			content = excluded.content,
+			updated_at = CURRENT_TIMESTAMP
+	`, teamName, req.Content); err != nil {
+		return nil, err
+	}
+
+	return GetTeamNoteByTeamName(teamName)
 }
 
 func GetCredentialsByTeamName(teamName string) ([]Credential, error) {

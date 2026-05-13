@@ -12,6 +12,7 @@
     NotebookPen,
     Plus,
     Radar,
+    Save,
     ShieldCheck,
     Trash2,
     Users
@@ -21,6 +22,12 @@
     name: string;
     subnetId: number | null;
     targets?: string[];
+  }
+
+  interface TeamNote {
+    teamName: string;
+    content: string;
+    updatedAt: string;
   }
 
   interface Credential {
@@ -216,6 +223,15 @@
   let easyCredentialTypeFilter = $state<"all" | "ntlm" | "password" | "aes">("all");
   let lastLoadedEasyTeam = $state("");
   let lastLoadedCredentialTeam = $state("");
+  let selectedNotesTeam = $state("");
+  let lastLoadedNotesTeam = $state("");
+  let noteContent = $state("");
+  let savedNoteContent = $state("");
+  let noteUpdatedAt = $state("");
+  let notesLoading = $state(false);
+  let notesSaving = $state(false);
+  let notesError = $state("");
+  let notesSaved = $state(false);
   let impacketPreferenceReady = $state(false);
   let commandForm = $state<CommandForm>({
     teamName: "",
@@ -289,6 +305,7 @@
   const targetTotal = $derived(
     targets.length || teams.reduce((total, team) => total + (team.targets?.length ?? 0), 0)
   );
+  const notesDirty = $derived(noteContent !== savedNoteContent);
   const groupedTargets = $derived.by(() => {
     const groups = new Map<string, Target[]>();
     for (const target of targets) {
@@ -737,6 +754,38 @@
     }
   };
 
+  const loadTeamNotes = async (teamName: string) => {
+    notesLoading = true;
+    notesError = "";
+    notesSaved = false;
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/notes`);
+      if (!response.ok) {
+        notesError = await readError(response, "Could not load notes.");
+        noteContent = "";
+        savedNoteContent = "";
+        noteUpdatedAt = "";
+        return;
+      }
+
+      const note = (await response.json()) as TeamNote;
+      if (selectedNotesTeam !== teamName) return;
+      noteContent = note.content;
+      savedNoteContent = note.content;
+      noteUpdatedAt = note.updatedAt;
+    } catch (error) {
+      notesError = error instanceof Error ? error.message : "Could not load notes.";
+      noteContent = "";
+      savedNoteContent = "";
+      noteUpdatedAt = "";
+    } finally {
+      if (selectedNotesTeam === teamName) {
+        notesLoading = false;
+      }
+    }
+  };
+
   const loadCommandCredentials = async (teamName: string) => {
     commandCredentialsLoading = true;
 
@@ -880,6 +929,41 @@
     easyMode = untrack(() => ({ ...easyMode, ...patch }));
   };
 
+  const handleSaveNotes = async () => {
+    notesError = "";
+    notesSaved = false;
+
+    if (!selectedNotesTeam) {
+      notesError = "Select a team first.";
+      return;
+    }
+
+    notesSaving = true;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(selectedNotesTeam)}/notes`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: noteContent })
+      });
+
+      if (!response.ok) {
+        notesError = await readError(response, "Could not save notes.");
+        return;
+      }
+
+      const note = (await response.json()) as TeamNote;
+      if (selectedNotesTeam !== note.teamName) return;
+      noteContent = note.content;
+      savedNoteContent = note.content;
+      noteUpdatedAt = note.updatedAt;
+      notesSaved = true;
+    } catch (error) {
+      notesError = error instanceof Error ? error.message : "Could not save notes.";
+    } finally {
+      notesSaving = false;
+    }
+  };
+
   $effect(() => {
     if (teams.length === 0) {
       if (selectedTeam) selectedTeam = "";
@@ -897,6 +981,12 @@
       if (easyCredentials.length > 0) easyCredentials = [];
       if (selectedCredentialTeam) selectedCredentialTeam = "";
       if (credentials.length > 0) credentials = [];
+      if (selectedNotesTeam) selectedNotesTeam = "";
+      if (noteContent) noteContent = "";
+      if (savedNoteContent) savedNoteContent = "";
+      if (noteUpdatedAt) noteUpdatedAt = "";
+      notesError = "";
+      notesSaved = false;
       return;
     }
 
@@ -914,6 +1004,10 @@
 
     if (!selectedCredentialTeam || !teams.some((team) => team.name === selectedCredentialTeam)) {
       selectedCredentialTeam = teams[0].name;
+    }
+
+    if (!selectedNotesTeam || !teams.some((team) => team.name === selectedNotesTeam)) {
+      selectedNotesTeam = teams[0].name;
     }
   });
 
@@ -964,6 +1058,18 @@
     credentialsPage = 1;
     credentialsSearch = "";
     void loadCredentials(selectedCredentialTeam);
+  });
+
+  $effect(() => {
+    if (!selectedNotesTeam) return;
+    if (selectedNotesTeam === lastLoadedNotesTeam) return;
+    lastLoadedNotesTeam = selectedNotesTeam;
+    noteContent = "";
+    savedNoteContent = "";
+    noteUpdatedAt = "";
+    notesError = "";
+    notesSaved = false;
+    void loadTeamNotes(selectedNotesTeam);
   });
 
   $effect(() => {
@@ -2762,12 +2868,58 @@
             <p class="mt-2 text-sm leading-6 text-white/60">
               Keep quick field notes here while the workspace stays quiet and readable.
             </p>
+            <label class="mt-5 block">
+              <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
+              <select
+                bind:value={selectedNotesTeam}
+                disabled={teams.length === 0 || notesLoading || notesSaving}
+                class="mt-2 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-lime-200/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {#each teams as team (team.name)}
+                  <option class="bg-[#0d1316]" value={team.name}>{team.name}</option>
+                {/each}
+              </select>
+            </label>
+            <div class="mt-4 rounded-md border border-white/10 bg-white/[0.035] p-3 text-xs text-white/55">
+              {#if teams.length === 0}
+                Create a team before saving notes.
+              {:else if notesLoading}
+                Loading notes for {selectedNotesTeam}...
+              {:else if notesError}
+                <span class="text-rose-200">{notesError}</span>
+              {:else if notesDirty}
+                Unsaved changes
+              {:else if notesSaved}
+                Saved{noteUpdatedAt ? ` at ${noteUpdatedAt}` : ""}
+              {:else if noteUpdatedAt}
+                Last saved {noteUpdatedAt}
+              {:else}
+                No saved notes yet
+              {/if}
+            </div>
           </div>
           <div class="rounded-md border border-white/10 bg-white/[0.035] p-5">
             <textarea
+              bind:value={noteContent}
+              disabled={teams.length === 0 || notesLoading}
+              oninput={() => (notesSaved = false)}
               class="min-h-[360px] w-full resize-y rounded-md border border-white/10 bg-black/30 p-4 text-sm leading-6 text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/50"
               placeholder="Drop notes, observations, or reminders here."
             ></textarea>
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs text-white/45">
+                {selectedNotesTeam || "No team selected"}
+              </p>
+              <Button
+                type="button"
+                disabled={!selectedNotesTeam || teams.length === 0 || notesLoading || notesSaving || !notesDirty}
+                class="bg-lime-200 text-slate-950 hover:bg-lime-100 disabled:opacity-50"
+                onclick={handleSaveNotes}
+              >
+                <Save class="mr-2 h-4 w-4" />
+                {notesSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
           </div>
         </section>
       {:else}

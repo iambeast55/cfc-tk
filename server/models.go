@@ -19,6 +19,16 @@ type UpdateTeamRequest struct {
 	SubnetId int    `json:"subnetId"`
 }
 
+type TeamNote struct {
+	TeamName  string `json:"teamName"`
+	Content   string `json:"content"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type SaveTeamNoteRequest struct {
+	Content string `json:"content"`
+}
+
 type AddTargetToTeam struct {
 	Name string `json:"name"`
 	IP   string `json:"ip"`

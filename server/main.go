@@ -32,6 +32,8 @@ func main() {
 	router.HandleFunc("/api/teams/{name}", getTeam).Methods("GET")
 	router.HandleFunc("/api/teams/{name}", updateTeam).Methods("PUT")
 	router.HandleFunc("/api/teams/{name}", deleteTeam).Methods("DELETE")
+	router.HandleFunc("/api/teams/{name}/notes", getTeamNotes).Methods("GET")
+	router.HandleFunc("/api/teams/{name}/notes", saveTeamNotes).Methods("PUT")
 	router.HandleFunc("/api/teams/{name}/credentials", getCredentials).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/credentials", createCredential).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/credentials", deleteCredentials).Methods("DELETE")
