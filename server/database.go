@@ -19,6 +19,7 @@ var ErrDuplicateDomainName = errors.New("domain already exists")
 var ErrDuplicateTargetIP = errors.New("target IP already exists")
 var ErrDomainTeamMismatch = errors.New("domain does not belong to team")
 var ErrDuplicateKerberosCache = errors.New("kerberos cache already exists")
+var ErrNoNetworkTargets = errors.New("no targets to scan")
 
 func initDB() error {
 	var err error
@@ -58,6 +59,56 @@ func initDB() error {
 	`
 
 	if _, err = db.Exec(createTeamNotesTableSQL); err != nil {
+		return err
+	}
+
+	createTargetOpenPortsTableSQL := `
+	CREATE TABLE IF NOT EXISTS target_open_ports (
+		team_name TEXT NOT NULL,
+		target_id INTEGER NOT NULL,
+		target_ip TEXT NOT NULL,
+		port INTEGER NOT NULL,
+		service TEXT DEFAULT '',
+		last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY(target_id, port),
+		FOREIGN KEY(team_name) REFERENCES teams(name) ON DELETE CASCADE,
+		FOREIGN KEY(target_id) REFERENCES targets(id) ON DELETE CASCADE
+	);
+	`
+
+	if _, err = db.Exec(createTargetOpenPortsTableSQL); err != nil {
+		return err
+	}
+
+	createNetworkScanStatusTableSQL := `
+	CREATE TABLE IF NOT EXISTS network_scan_status (
+		team_name TEXT NOT NULL PRIMARY KEY,
+		last_scanned_at TEXT DEFAULT '',
+		last_error TEXT DEFAULT '',
+		FOREIGN KEY(team_name) REFERENCES teams(name) ON DELETE CASCADE
+	);
+	`
+
+	if _, err = db.Exec(createNetworkScanStatusTableSQL); err != nil {
+		return err
+	}
+
+	createNetworkPollingConfigTableSQL := `
+	CREATE TABLE IF NOT EXISTS network_polling_config (
+		id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+		enabled INTEGER NOT NULL DEFAULT 0,
+		interval_seconds INTEGER NOT NULL DEFAULT 60,
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+
+	if _, err = db.Exec(createNetworkPollingConfigTableSQL); err != nil {
+		return err
+	}
+	if _, err = db.Exec(`
+		INSERT OR IGNORE INTO network_polling_config (id, enabled, interval_seconds)
+		VALUES (1, 0, 60);
+	`); err != nil {
 		return err
 	}
 
@@ -338,6 +389,155 @@ func SaveTeamNote(teamName string, req SaveTeamNoteRequest) (*TeamNote, error) {
 	}
 
 	return GetTeamNoteByTeamName(teamName)
+}
+
+func GetTeamNetworkStatus(teamName string) (*TeamNetworkStatus, error) {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return nil, err
+	}
+
+	targets, err := GetTargetsByTeamName(teamName)
+	if err != nil {
+		return nil, err
+	}
+
+	status := &TeamNetworkStatus{
+		TeamName: teamName,
+		Targets:  []TargetNetworkStatus{},
+	}
+
+	if err := db.QueryRow(`
+		SELECT COALESCE(last_scanned_at, ''), COALESCE(last_error, '')
+		FROM network_scan_status
+		WHERE team_name = ?
+	`, teamName).Scan(&status.LastScannedAt, &status.LastError); err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	openPortsByTarget := map[int][]OpenPort{}
+	rows, err := db.Query(`
+		SELECT team_name, target_id, target_ip, port, service, last_seen_at
+		FROM target_open_ports
+		WHERE team_name = ?
+		ORDER BY target_id, port
+	`, teamName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var port OpenPort
+		if err := rows.Scan(
+			&port.TeamName,
+			&port.TargetID,
+			&port.TargetIP,
+			&port.Port,
+			&port.Service,
+			&port.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		openPortsByTarget[port.TargetID] = append(openPortsByTarget[port.TargetID], port)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, target := range targets {
+		status.Targets = append(status.Targets, TargetNetworkStatus{
+			Target:    target,
+			OpenPorts: openPortsByTarget[target.ID],
+		})
+	}
+
+	return status, nil
+}
+
+func ReplaceTargetOpenPorts(teamName string, targets []Target, ports []OpenPort, scanErr string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, target := range targets {
+		if _, err := tx.Exec("DELETE FROM target_open_ports WHERE team_name = ? AND target_id = ?", teamName, target.ID); err != nil {
+			return err
+		}
+	}
+
+	for _, port := range ports {
+		if _, err := tx.Exec(`
+			INSERT INTO target_open_ports (team_name, target_id, target_ip, port, service, last_seen_at)
+			VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		`, teamName, port.TargetID, port.TargetIP, port.Port, port.Service); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO network_scan_status (team_name, last_scanned_at, last_error)
+		VALUES (?, CURRENT_TIMESTAMP, ?)
+		ON CONFLICT(team_name) DO UPDATE SET
+			last_scanned_at = CURRENT_TIMESTAMP,
+			last_error = excluded.last_error
+	`, teamName, scanErr); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func UpdateNetworkScanError(teamName string, scanErr string) error {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return err
+	}
+
+	_, err := db.Exec(`
+		INSERT INTO network_scan_status (team_name, last_scanned_at, last_error)
+		VALUES (?, CURRENT_TIMESTAMP, ?)
+		ON CONFLICT(team_name) DO UPDATE SET
+			last_scanned_at = CURRENT_TIMESTAMP,
+			last_error = excluded.last_error
+	`, teamName, scanErr)
+	return err
+}
+
+func GetNetworkPollingConfig() (*NetworkPollingConfig, error) {
+	var enabled int
+	var config NetworkPollingConfig
+	err := db.QueryRow(`
+		SELECT enabled, interval_seconds, updated_at
+		FROM network_polling_config
+		WHERE id = 1
+	`).Scan(&enabled, &config.IntervalSeconds, &config.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	config.Enabled = enabled == 1
+	return &config, nil
+}
+
+func SaveNetworkPollingConfig(req SaveNetworkPollingConfigRequest) (*NetworkPollingConfig, error) {
+	interval := req.IntervalSeconds
+	if interval < 15 {
+		interval = 15
+	}
+	enabled := 0
+	if req.Enabled {
+		enabled = 1
+	}
+
+	if _, err := db.Exec(`
+		UPDATE network_polling_config
+		SET enabled = ?, interval_seconds = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = 1
+	`, enabled, interval); err != nil {
+		return nil, err
+	}
+
+	return GetNetworkPollingConfig()
 }
 
 func GetCredentialsByTeamName(teamName string) ([]Credential, error) {

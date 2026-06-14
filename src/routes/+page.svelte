@@ -30,6 +30,33 @@
     updatedAt: string;
   }
 
+  interface OpenPort {
+    teamName: string;
+    targetId: number;
+    targetIp: string;
+    port: number;
+    service: string;
+    lastSeenAt: string;
+  }
+
+  interface TargetNetworkStatus {
+    target: Target;
+    openPorts: OpenPort[] | null;
+  }
+
+  interface TeamNetworkStatus {
+    teamName: string;
+    targets: TargetNetworkStatus[];
+    lastScannedAt: string;
+    lastError: string;
+  }
+
+  interface NetworkPollingConfig {
+    enabled: boolean;
+    intervalSeconds: number;
+    updatedAt: string;
+  }
+
   interface Credential {
     id: number;
     teamName: string;
@@ -162,7 +189,7 @@
     credentialId: string;
   }
 
-  type TabId = "main" | "easy" | "command" | "notes" | "credentials";
+  type TabId = "main" | "easy" | "command" | "notes" | "network" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
@@ -232,6 +259,20 @@
   let notesSaving = $state(false);
   let notesError = $state("");
   let notesSaved = $state(false);
+  let selectedNetworkTeam = $state("");
+  let lastLoadedNetworkTeam = $state("");
+  let networkStatus = $state<TeamNetworkStatus | null>(null);
+  let networkLoading = $state(false);
+  let networkScanning = $state(false);
+  let networkError = $state("");
+  let networkConfig = $state<NetworkPollingConfig>({
+    enabled: false,
+    intervalSeconds: 60,
+    updatedAt: ""
+  });
+  let networkConfigLoading = $state(false);
+  let networkConfigSaving = $state(false);
+  let networkConfigError = $state("");
   let impacketPreferenceReady = $state(false);
   let commandForm = $state<CommandForm>({
     teamName: "",
@@ -298,6 +339,7 @@
     { id: "easy", label: "Easy", eyebrow: "guided" },
     { id: "command", label: "Command", eyebrow: "run" },
     { id: "notes", label: "Notes", eyebrow: "field" },
+    { id: "network", label: "Network", eyebrow: "status" },
     { id: "credentials", label: "Credentials", eyebrow: "vault" }
   ];
 
@@ -306,6 +348,9 @@
     targets.length || teams.reduce((total, team) => total + (team.targets?.length ?? 0), 0)
   );
   const notesDirty = $derived(noteContent !== savedNoteContent);
+  const networkOpenPortCount = $derived(
+    networkStatus?.targets.reduce((total, item) => total + (item.openPorts?.length ?? 0), 0) ?? 0
+  );
   const groupedTargets = $derived.by(() => {
     const groups = new Map<string, Target[]>();
     for (const target of targets) {
@@ -510,6 +555,18 @@
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
     return body.trim() || fallback;
+  };
+
+  const openPortLabel = (port: OpenPort) => {
+    const names: Record<number, string> = {
+      135: "RPC",
+      139: "NetBIOS",
+      389: "LDAP",
+      445: "SMB",
+      3389: "RDP",
+      5985: "WinRM"
+    };
+    return `${port.port} ${port.service || names[port.port] || ""}`.trim();
   };
 
   const isValidIp = (value: string) => {
@@ -786,6 +843,51 @@
     }
   };
 
+  const loadNetworkStatus = async (teamName: string) => {
+    networkLoading = true;
+    networkError = "";
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/network-status`);
+      if (!response.ok) {
+        networkError = await readError(response, "Could not load network status.");
+        networkStatus = null;
+        return;
+      }
+
+      const status = (await response.json()) as TeamNetworkStatus;
+      if (selectedNetworkTeam !== teamName) return;
+      networkStatus = status;
+      networkError = status.lastError;
+    } catch (error) {
+      networkError = error instanceof Error ? error.message : "Could not load network status.";
+      networkStatus = null;
+    } finally {
+      if (selectedNetworkTeam === teamName) {
+        networkLoading = false;
+      }
+    }
+  };
+
+  const loadNetworkConfig = async () => {
+    networkConfigLoading = true;
+    networkConfigError = "";
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/network-status/config`);
+      if (!response.ok) {
+        networkConfigError = await readError(response, "Could not load polling config.");
+        return;
+      }
+
+      networkConfig = (await response.json()) as NetworkPollingConfig;
+    } catch (error) {
+      networkConfigError = error instanceof Error ? error.message : "Could not load polling config.";
+    } finally {
+      networkConfigLoading = false;
+    }
+  };
+
   const loadCommandCredentials = async (teamName: string) => {
     commandCredentialsLoading = true;
 
@@ -964,6 +1066,61 @@
     }
   };
 
+  const handleScanNetworkStatus = async () => {
+    networkError = "";
+
+    if (!selectedNetworkTeam) {
+      networkError = "Select a team first.";
+      return;
+    }
+
+    networkScanning = true;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(selectedNetworkTeam)}/network-status/scan`, {
+        method: "POST"
+      });
+      const status = (await response.json().catch(() => null)) as TeamNetworkStatus | null;
+      if (status && selectedNetworkTeam === status.teamName) {
+        networkStatus = status;
+        networkError = status.lastError;
+      }
+      if (!response.ok) {
+        networkError = status?.lastError || "Could not scan network status.";
+        return;
+      }
+    } catch (error) {
+      networkError = error instanceof Error ? error.message : "Could not scan network status.";
+    } finally {
+      networkScanning = false;
+    }
+  };
+
+  const handleSaveNetworkConfig = async () => {
+    networkConfigSaving = true;
+    networkConfigError = "";
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/network-status/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: networkConfig.enabled,
+          intervalSeconds: networkConfig.intervalSeconds
+        })
+      });
+      if (!response.ok) {
+        networkConfigError = await readError(response, "Could not save polling config.");
+        return;
+      }
+
+      networkConfig = (await response.json()) as NetworkPollingConfig;
+    } catch (error) {
+      networkConfigError = error instanceof Error ? error.message : "Could not save polling config.";
+    } finally {
+      networkConfigSaving = false;
+    }
+  };
+
   $effect(() => {
     if (teams.length === 0) {
       if (selectedTeam) selectedTeam = "";
@@ -987,6 +1144,9 @@
       if (noteUpdatedAt) noteUpdatedAt = "";
       notesError = "";
       notesSaved = false;
+      if (selectedNetworkTeam) selectedNetworkTeam = "";
+      if (networkStatus) networkStatus = null;
+      networkError = "";
       return;
     }
 
@@ -1008,6 +1168,10 @@
 
     if (!selectedNotesTeam || !teams.some((team) => team.name === selectedNotesTeam)) {
       selectedNotesTeam = teams[0].name;
+    }
+
+    if (!selectedNetworkTeam || !teams.some((team) => team.name === selectedNetworkTeam)) {
+      selectedNetworkTeam = teams[0].name;
     }
   });
 
@@ -1073,6 +1237,15 @@
   });
 
   $effect(() => {
+    if (!selectedNetworkTeam) return;
+    if (selectedNetworkTeam === lastLoadedNetworkTeam) return;
+    lastLoadedNetworkTeam = selectedNetworkTeam;
+    networkStatus = null;
+    networkError = "";
+    void loadNetworkStatus(selectedNetworkTeam);
+  });
+
+  $effect(() => {
     if (!impacketPreferenceReady) return;
     localStorage.setItem(IMPACKET_STYLE_KEY, commandForm.impacketStyle);
   });
@@ -1093,6 +1266,8 @@
   });
 
   onMount(() => {
+    void loadNetworkConfig();
+
     const savedStyle = localStorage.getItem(IMPACKET_STYLE_KEY);
     if (savedStyle === "kali" || savedStyle === "pythonScripts" || savedStyle === "custom") {
       commandForm = { ...commandForm, impacketStyle: savedStyle };
@@ -2919,6 +3094,142 @@
                 <Save class="mr-2 h-4 w-4" />
                 {notesSaving ? "Saving..." : "Save"}
               </Button>
+            </div>
+          </div>
+        </section>
+      {:else if activeTab === "network"}
+        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
+            <Radar class="h-6 w-6 text-teal-100" />
+            <h2 class="mt-4 text-xl font-semibold text-white">Network Status</h2>
+            <p class="mt-2 text-sm leading-6 text-white/60">
+              Track currently open Windows service ports on known targets.
+            </p>
+
+            <label class="mt-5 block">
+              <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
+              <select
+                bind:value={selectedNetworkTeam}
+                disabled={teams.length === 0 || networkLoading || networkScanning}
+                class="mt-2 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-teal-200/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {#each teams as team (team.name)}
+                  <option class="bg-[#0d1316]" value={team.name}>{team.name}</option>
+                {/each}
+              </select>
+            </label>
+
+            <div class="mt-4 grid gap-3 rounded-md border border-white/10 bg-white/[0.035] p-3">
+              <label class="flex items-center justify-between gap-3 text-sm text-white/75">
+                <span>Polling</span>
+                <input
+                  type="checkbox"
+                  bind:checked={networkConfig.enabled}
+                  disabled={networkConfigLoading || networkConfigSaving}
+                  class="h-4 w-4 rounded border-white/20 bg-black/30 text-teal-200"
+                />
+              </label>
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Interval seconds</span>
+                <input
+                  type="number"
+                  min="15"
+                  bind:value={networkConfig.intervalSeconds}
+                  disabled={networkConfigLoading || networkConfigSaving}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-teal-200/50 disabled:opacity-50"
+                />
+              </label>
+              <Button
+                type="button"
+                disabled={networkConfigLoading || networkConfigSaving}
+                class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                onclick={handleSaveNetworkConfig}
+              >
+                <Save class="mr-2 h-4 w-4" />
+                {networkConfigSaving ? "Saving..." : "Save polling"}
+              </Button>
+              {#if networkConfigError}
+                <p class="text-sm text-rose-100">{networkConfigError}</p>
+              {/if}
+            </div>
+
+            <Button
+              type="button"
+              disabled={!selectedNetworkTeam || teams.length === 0 || networkScanning}
+              class="mt-4 w-full bg-teal-200 text-slate-950 hover:bg-teal-100"
+              onclick={handleScanNetworkStatus}
+            >
+              <Radar class="mr-2 h-4 w-4" />
+              {networkScanning ? "Scanning..." : "Scan now"}
+            </Button>
+          </div>
+
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Open tracked ports</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">{selectedNetworkTeam || "No team selected"}</h2>
+                <p class="mt-2 text-sm text-white/50">
+                  {networkOpenPortCount} open ports / last scan {networkStatus?.lastScannedAt || "not scanned yet"}
+                </p>
+              </div>
+              <Button
+                type="button"
+                disabled={!selectedNetworkTeam || networkLoading}
+                class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                onclick={() => selectedNetworkTeam && loadNetworkStatus(selectedNetworkTeam)}
+              >
+                Refresh
+              </Button>
+            </div>
+
+            {#if networkError}
+              <p class="mt-4 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">{networkError}</p>
+            {/if}
+
+            <div class="mt-5 overflow-x-auto rounded-md border border-white/10">
+              <table class="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead class="bg-white/[0.045] text-xs uppercase tracking-[0.18em] text-white/45">
+                  <tr>
+                    <th class="px-3 py-3 font-semibold">Host</th>
+                    <th class="px-3 py-3 font-semibold">IP</th>
+                    <th class="px-3 py-3 font-semibold">OS</th>
+                    <th class="px-3 py-3 font-semibold">Open ports</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-white/10">
+                  {#if networkLoading}
+                    <tr>
+                      <td class="px-3 py-6 text-white/55" colspan="4">Loading network status...</td>
+                    </tr>
+                  {:else if !networkStatus || networkStatus.targets.length === 0}
+                    <tr>
+                      <td class="px-3 py-6 text-white/55" colspan="4">No targets for this team yet.</td>
+                    </tr>
+                  {:else}
+                    {#each networkStatus.targets as item (item.target.id)}
+                      <tr class="align-top transition hover:bg-white/[0.035]">
+                        <td class="px-3 py-3 font-medium text-white">{item.target.hostname}</td>
+                        <td class="px-3 py-3 font-mono text-xs text-teal-100">{item.target.ip}</td>
+                        <td class="px-3 py-3 capitalize text-white/60">{item.target.os}</td>
+                        <td class="px-3 py-3">
+                          {#if item.openPorts?.length}
+                            <div class="flex flex-wrap gap-2">
+                              {#each item.openPorts as port (`${item.target.id}-${port.port}`)}
+                                <span class="rounded-md border border-lime-200/30 bg-lime-200/10 px-2 py-1 font-mono text-xs text-lime-100" title={port.lastSeenAt}>
+                                  {openPortLabel(port)}
+                                </span>
+                              {/each}
+                            </div>
+                          {:else}
+                            <span class="text-white/45">No open tracked ports</span>
+                          {/if}
+                        </td>
+                      </tr>
+                    {/each}
+                  {/if}
+                </tbody>
+              </table>
             </div>
           </div>
         </section>

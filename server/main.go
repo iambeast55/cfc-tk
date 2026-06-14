@@ -19,6 +19,7 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer closeDB()
+	StartNetworkStatusPoller()
 
 	// Create router
 	router := mux.NewRouter()
@@ -34,6 +35,8 @@ func main() {
 	router.HandleFunc("/api/teams/{name}", deleteTeam).Methods("DELETE")
 	router.HandleFunc("/api/teams/{name}/notes", getTeamNotes).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/notes", saveTeamNotes).Methods("PUT")
+	router.HandleFunc("/api/teams/{name}/network-status", getNetworkStatus).Methods("GET")
+	router.HandleFunc("/api/teams/{name}/network-status/scan", scanNetworkStatus).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/credentials", getCredentials).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/credentials", createCredential).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/credentials", deleteCredentials).Methods("DELETE")
@@ -47,6 +50,8 @@ func main() {
 	router.HandleFunc("/api/teams/{name}/targets", getTargets).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/targets", createTarget).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/targets/{id}", deleteTarget).Methods("DELETE")
+	router.HandleFunc("/api/network-status/config", getNetworkPollingConfig).Methods("GET")
+	router.HandleFunc("/api/network-status/config", saveNetworkPollingConfig).Methods("PUT")
 
 	// Health check
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

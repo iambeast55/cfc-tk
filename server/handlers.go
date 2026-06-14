@@ -212,6 +212,84 @@ func saveTeamNotes(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(note)
 }
 
+func getNetworkStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	status, err := GetTeamNetworkStatus(teamName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching network status: %v", err)
+		http.Error(w, "Failed to fetch network status", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(status)
+}
+
+func scanNetworkStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	status, err := ScanTeamOpenPorts(teamName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(status)
+		return
+	}
+
+	json.NewEncoder(w).Encode(status)
+}
+
+func getNetworkPollingConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	config, err := GetNetworkPollingConfig()
+	if err != nil {
+		log.Printf("Error fetching network polling config: %v", err)
+		http.Error(w, "Failed to fetch network polling config", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(config)
+}
+
+func saveNetworkPollingConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req SaveNetworkPollingConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	config, err := SaveNetworkPollingConfig(req)
+	if err != nil {
+		log.Printf("Error saving network polling config: %v", err)
+		http.Error(w, "Failed to save network polling config", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(config)
+}
+
 func getCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

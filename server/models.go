@@ -29,6 +29,38 @@ type SaveTeamNoteRequest struct {
 	Content string `json:"content"`
 }
 
+type OpenPort struct {
+	TeamName   string `json:"teamName"`
+	TargetID   int    `json:"targetId"`
+	TargetIP   string `json:"targetIp"`
+	Port       int    `json:"port"`
+	Service    string `json:"service"`
+	LastSeenAt string `json:"lastSeenAt"`
+}
+
+type TargetNetworkStatus struct {
+	Target    Target     `json:"target"`
+	OpenPorts []OpenPort `json:"openPorts"`
+}
+
+type TeamNetworkStatus struct {
+	TeamName      string                `json:"teamName"`
+	Targets       []TargetNetworkStatus `json:"targets"`
+	LastScannedAt string                `json:"lastScannedAt"`
+	LastError     string                `json:"lastError"`
+}
+
+type NetworkPollingConfig struct {
+	Enabled         bool   `json:"enabled"`
+	IntervalSeconds int    `json:"intervalSeconds"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
+type SaveNetworkPollingConfigRequest struct {
+	Enabled         bool `json:"enabled"`
+	IntervalSeconds int  `json:"intervalSeconds"`
+}
+
 type AddTargetToTeam struct {
 	Name string `json:"name"`
 	IP   string `json:"ip"`
