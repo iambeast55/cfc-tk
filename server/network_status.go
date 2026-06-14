@@ -102,7 +102,7 @@ func ScanTeamOpenPorts(teamName string) (*TeamNetworkStatus, error) {
 }
 
 func runNmapOpenPortScan(targets []Target) ([]OpenPort, error) {
-	args := []string{"-p", trackedPortList(), "--open", "-oX", "-"}
+	args := []string{"-Pn", "-p", trackedPortList(), "--open", "-oX", "-"}
 	targetsByIP := map[string]Target{}
 	for _, target := range targets {
 		ip := strings.TrimSpace(target.IP)
