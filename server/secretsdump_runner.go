@@ -190,6 +190,10 @@ func parseSecretsdumpCredentials(output string, fallbackDomain string, target st
 		if matches := aesDumpPattern.FindStringSubmatch(line); matches != nil {
 			accountDomain, username := splitDumpAccount(matches[1], fallbackDomain, false)
 			algorithm := matches[2]
+			secretType := aesSecretType(algorithm)
+			if shouldFilterCredentialSecretType(secretType) {
+				continue
+			}
 			key := strings.ToLower(matches[3])
 			host := ""
 			if strings.HasSuffix(username, "$") {
@@ -199,7 +203,7 @@ func parseSecretsdumpCredentials(output string, fallbackDomain string, target st
 			req := CreateCredentialRequest{
 				OS:         "windows",
 				Username:   username,
-				SecretType: aesSecretType(algorithm),
+				SecretType: secretType,
 				Secret:     key,
 				Domain:     accountDomain,
 				Host:       host,
@@ -235,6 +239,10 @@ func aesSecretType(algorithm string) string {
 		return "kerberos-aes128"
 	}
 	return "kerberos-aes"
+}
+
+func shouldFilterCredentialSecretType(secretType string) bool {
+	return secretType == "kerberos-aes128"
 }
 
 func addCredentialOnce(seen map[string]bool, req CreateCredentialRequest) bool {

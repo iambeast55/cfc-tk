@@ -12,8 +12,8 @@ CORP\Administrator:aes128-cts-hmac-sha1-96:00112233445566778899aabbccddeeff
 `
 
 	credentials := parseSecretsdumpCredentials(output, "CORP", "10.0.0.5")
-	if len(credentials) != 4 {
-		t.Fatalf("expected 4 credentials, got %d", len(credentials))
+	if len(credentials) != 3 {
+		t.Fatalf("expected 3 credentials, got %d", len(credentials))
 	}
 
 	adminNTLM := credentials[0]
@@ -31,9 +31,6 @@ CORP\Administrator:aes128-cts-hmac-sha1-96:00112233445566778899aabbccddeeff
 
 	if credentials[2].SecretType != "kerberos-aes256" {
 		t.Fatalf("expected kerberos-aes256, got %s", credentials[2].SecretType)
-	}
-	if credentials[3].SecretType != "kerberos-aes128" {
-		t.Fatalf("expected kerberos-aes128, got %s", credentials[3].SecretType)
 	}
 }
 

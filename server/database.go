@@ -545,6 +545,7 @@ func GetCredentialsByTeamName(teamName string) ([]Credential, error) {
 		SELECT id, team_name, os, username, secret_type, secret, rid, domain, host, ip, created_at
 		FROM credentials
 		WHERE team_name = ?
+			AND secret_type != 'kerberos-aes128'
 		ORDER BY created_at DESC, id DESC
 	`, teamName)
 	if err != nil {
