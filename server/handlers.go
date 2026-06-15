@@ -290,6 +290,70 @@ func saveNetworkPollingConfig(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(config)
 }
 
+func getRemoteTaskRuns(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	runs, err := GetRemoteTaskRunsByTeamName(teamName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching remote task runs: %v", err)
+		http.Error(w, "Failed to fetch remote task runs", http.StatusInternalServerError)
+		return
+	}
+	if runs == nil {
+		runs = []RemoteTaskRun{}
+	}
+
+	json.NewEncoder(w).Encode(runs)
+}
+
+func runRemoteTask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	teamName := mux.Vars(r)["name"]
+	if teamName == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	var req RunRemoteTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	run, err := RunRemoteTask(teamName, req)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team, target, or credential not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, ErrUnsupportedRemoteTaskMethod) || errors.Is(err, ErrUnsupportedRemoteTaskCredential) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if run != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(run)
+			return
+		}
+		log.Printf("Error running remote task: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(run)
+}
+
 func getCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

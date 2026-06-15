@@ -10,10 +10,12 @@
     CircleDot,
     KeyRound,
     NotebookPen,
+    Play,
     Plus,
     Radar,
     Save,
     ShieldCheck,
+    Terminal,
     Trash2,
     Users
   } from "lucide-svelte";
@@ -55,6 +57,24 @@
     enabled: boolean;
     intervalSeconds: number;
     updatedAt: string;
+  }
+
+  interface RemoteTaskRun {
+    id: number;
+    teamName: string;
+    targetId: number;
+    targetLabel: string;
+    targetAddress: string;
+    credentialId: number;
+    credentialName: string;
+    method: "wmiexec" | "psexec";
+    command: string;
+    commandPreview: string;
+    status: "succeeded" | "failed";
+    output: string;
+    error: string;
+    startedAt: string;
+    finishedAt: string;
   }
 
   interface Credential {
@@ -189,7 +209,7 @@
     credentialId: string;
   }
 
-  type TabId = "main" | "easy" | "command" | "notes" | "network" | "credentials";
+  type TabId = "main" | "easy" | "command" | "tasks" | "notes" | "network" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
@@ -273,6 +293,23 @@
   let networkConfigLoading = $state(false);
   let networkConfigSaving = $state(false);
   let networkConfigError = $state("");
+  let selectedTaskTeam = $state("");
+  let lastLoadedTaskTeam = $state("");
+  let taskTargets = $state<Target[]>([]);
+  let taskCredentials = $state<Credential[]>([]);
+  let taskRuns = $state<RemoteTaskRun[]>([]);
+  let taskLoading = $state(false);
+  let taskRunning = $state(false);
+  let taskError = $state("");
+  let taskOutput = $state("");
+  let taskForm = $state({
+    targetId: "",
+    credentialId: "",
+    method: "wmiexec" as "wmiexec" | "psexec",
+    preset: "whoami",
+    command: "whoami",
+    timeout: 60
+  });
   let impacketPreferenceReady = $state(false);
   let commandForm = $state<CommandForm>({
     teamName: "",
@@ -338,6 +375,7 @@
     { id: "main", label: "Main", eyebrow: "ops" },
     { id: "easy", label: "Easy", eyebrow: "guided" },
     { id: "command", label: "Command", eyebrow: "run" },
+    { id: "tasks", label: "Tasks", eyebrow: "remote" },
     { id: "notes", label: "Notes", eyebrow: "field" },
     { id: "network", label: "Network", eyebrow: "status" },
     { id: "credentials", label: "Credentials", eyebrow: "vault" }
@@ -350,6 +388,21 @@
   const notesDirty = $derived(noteContent !== savedNoteContent);
   const networkOpenPortCount = $derived(
     networkStatus?.targets.reduce((total, item) => total + (item.openPorts?.length ?? 0), 0) ?? 0
+  );
+  const remoteTaskPresets = [
+    { id: "whoami", label: "Whoami", command: "whoami" },
+    { id: "hostname", label: "Hostname", command: "hostname" },
+    { id: "ipconfig", label: "IP config", command: "ipconfig /all" },
+    { id: "query-user", label: "Logged-on users", command: "query user" },
+    { id: "admins", label: "Local admins", command: "net localgroup administrators" },
+    { id: "tasklist", label: "Task list", command: "tasklist" },
+    { id: "custom", label: "Custom", command: "" }
+  ];
+  const selectedTaskTarget = $derived(
+    taskTargets.find((target) => String(target.id) === taskForm.targetId)
+  );
+  const selectedTaskCredential = $derived(
+    taskCredentials.find((credential) => String(credential.id) === taskForm.credentialId)
   );
   const groupedTargets = $derived.by(() => {
     const groups = new Map<string, Target[]>();
@@ -551,6 +604,25 @@
       aesKey: credential.secret
     };
   };
+
+  const taskCredentialPreview = (credential: Credential | undefined, target: Target | undefined) => {
+    if (!credential || !target) return "";
+    const identity = credential.domain ? `${credential.domain}/${credential.username}` : credential.username;
+    const address = target.ip || target.hostname;
+    if (credential.secretType === "password") return `${identity}:<redacted>@${address}`;
+    if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") return `-hashes :<redacted> ${identity}@${address}`;
+    if (credential.secretType.includes("aes")) return `-aesKey <redacted> ${identity}@${address}`;
+    return `${identity}@${address}`;
+  };
+
+  const taskCommandPreview = $derived.by(() => {
+    const target = selectedTaskTarget;
+    const credential = selectedTaskCredential;
+    if (!target || !credential || !taskForm.command.trim()) {
+      return "";
+    }
+    return `impacket-${taskForm.method} ${taskCredentialPreview(credential, target)} ${taskForm.command.trim()}`;
+  });
 
   const readError = async (response: Response, fallback: string) => {
     const body = await response.text().catch(() => "");
@@ -888,6 +960,64 @@
     }
   };
 
+  const loadRemoteTaskData = async (teamName: string) => {
+    taskLoading = true;
+    taskError = "";
+
+    try {
+      const [targetsResponse, credentialsResponse, runsResponse] = await Promise.all([
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/targets`),
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/credentials`),
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/remote-tasks/runs`)
+      ]);
+
+      if (!targetsResponse.ok) {
+        taskError = await readError(targetsResponse, "Could not load task targets.");
+        taskTargets = [];
+        taskCredentials = [];
+        taskRuns = [];
+        return;
+      }
+      if (!credentialsResponse.ok) {
+        taskError = await readError(credentialsResponse, "Could not load task credentials.");
+        taskTargets = [];
+        taskCredentials = [];
+        taskRuns = [];
+        return;
+      }
+      if (!runsResponse.ok) {
+        taskError = await readError(runsResponse, "Could not load task history.");
+      }
+
+      const nextTargets = (await targetsResponse.json()) as Target[];
+      const nextCredentials = ((await credentialsResponse.json()) as Credential[]).filter((credential) =>
+        ["password", "ntlm", "kerberos-ntlm", "kerberos-aes256", "kerberos-aes"].includes(credential.secretType)
+      );
+      const nextRuns = runsResponse.ok ? ((await runsResponse.json()) as RemoteTaskRun[]) : [];
+
+      if (selectedTaskTeam !== teamName) return;
+      taskTargets = nextTargets;
+      taskCredentials = nextCredentials;
+      taskRuns = nextRuns;
+
+      if (!taskForm.targetId && nextTargets.length) {
+        taskForm = { ...taskForm, targetId: String(nextTargets[0].id) };
+      }
+      if (!taskForm.credentialId && nextCredentials.length) {
+        taskForm = { ...taskForm, credentialId: String(nextCredentials[0].id) };
+      }
+    } catch (error) {
+      taskError = error instanceof Error ? error.message : "Could not load remote task data.";
+      taskTargets = [];
+      taskCredentials = [];
+      taskRuns = [];
+    } finally {
+      if (selectedTaskTeam === teamName) {
+        taskLoading = false;
+      }
+    }
+  };
+
   const loadCommandCredentials = async (teamName: string) => {
     commandCredentialsLoading = true;
 
@@ -1121,6 +1251,63 @@
     }
   };
 
+  const handleTaskPresetChange = () => {
+    const preset = remoteTaskPresets.find((item) => item.id === taskForm.preset);
+    if (!preset || preset.id === "custom") return;
+    taskForm = { ...taskForm, command: preset.command };
+  };
+
+  const handleRunRemoteTask = async () => {
+    taskError = "";
+    taskOutput = "";
+
+    if (!selectedTaskTeam) {
+      taskError = "Select a team first.";
+      return;
+    }
+    if (!taskForm.targetId) {
+      taskError = "Select a target.";
+      return;
+    }
+    if (!taskForm.credentialId) {
+      taskError = "Select a credential.";
+      return;
+    }
+    if (!taskForm.command.trim()) {
+      taskError = "Command is required.";
+      return;
+    }
+
+    taskRunning = true;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(selectedTaskTeam)}/remote-tasks/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetId: Number(taskForm.targetId),
+          credentialId: Number(taskForm.credentialId),
+          method: taskForm.method,
+          command: taskForm.command.trim(),
+          timeout: Number(taskForm.timeout) || 60
+        })
+      });
+
+      const run = (await response.json().catch(() => null)) as RemoteTaskRun | null;
+      if (run) {
+        taskOutput = [run.output, run.error ? `Error: ${run.error}` : ""].filter(Boolean).join("\n");
+        taskRuns = [run, ...taskRuns.filter((item) => item.id !== run.id)];
+      }
+      if (!response.ok) {
+        taskError = run?.error || "Remote task failed.";
+        return;
+      }
+    } catch (error) {
+      taskError = error instanceof Error ? error.message : "Could not run remote task.";
+    } finally {
+      taskRunning = false;
+    }
+  };
+
   $effect(() => {
     if (teams.length === 0) {
       if (selectedTeam) selectedTeam = "";
@@ -1147,6 +1334,12 @@
       if (selectedNetworkTeam) selectedNetworkTeam = "";
       if (networkStatus) networkStatus = null;
       networkError = "";
+      if (selectedTaskTeam) selectedTaskTeam = "";
+      if (taskTargets.length > 0) taskTargets = [];
+      if (taskCredentials.length > 0) taskCredentials = [];
+      if (taskRuns.length > 0) taskRuns = [];
+      taskError = "";
+      taskOutput = "";
       return;
     }
 
@@ -1172,6 +1365,10 @@
 
     if (!selectedNetworkTeam || !teams.some((team) => team.name === selectedNetworkTeam)) {
       selectedNetworkTeam = teams[0].name;
+    }
+
+    if (!selectedTaskTeam || !teams.some((team) => team.name === selectedTaskTeam)) {
+      selectedTaskTeam = teams[0].name;
     }
   });
 
@@ -1243,6 +1440,26 @@
     networkStatus = null;
     networkError = "";
     void loadNetworkStatus(selectedNetworkTeam);
+  });
+
+  $effect(() => {
+    if (!selectedTaskTeam) return;
+    if (selectedTaskTeam === lastLoadedTaskTeam) return;
+    lastLoadedTaskTeam = selectedTaskTeam;
+    taskTargets = [];
+    taskCredentials = [];
+    taskRuns = [];
+    taskError = "";
+    taskOutput = "";
+    taskForm = {
+      targetId: "",
+      credentialId: "",
+      method: "wmiexec",
+      preset: "whoami",
+      command: "whoami",
+      timeout: 60
+    };
+    void loadRemoteTaskData(selectedTaskTeam);
   });
 
   $effect(() => {
@@ -3028,6 +3245,200 @@
                           Use
                         </Button>
                       </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+        </section>
+      {:else if activeTab === "tasks"}
+        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
+            <Terminal class="h-6 w-6 text-lime-100" />
+            <h2 class="mt-4 text-xl font-semibold text-white">Remote Tasks</h2>
+            <p class="mt-2 text-sm leading-6 text-white/60">
+              Run explicit, single-target Impacket tasks and capture output.
+            </p>
+
+            <div class="mt-6 grid min-w-0 gap-3">
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
+                <select
+                  bind:value={selectedTaskTeam}
+                  disabled={teams.length === 0 || taskLoading || taskRunning}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45 disabled:opacity-50"
+                >
+                  {#each teams as team (team.name)}
+                    <option class="bg-[#0d1316]" value={team.name}>{team.name}</option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Target</span>
+                <select
+                  bind:value={taskForm.targetId}
+                  disabled={taskTargets.length === 0 || taskRunning}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45 disabled:opacity-50"
+                >
+                  {#each taskTargets as target (target.id)}
+                    <option class="bg-[#0d1316]" value={String(target.id)}>{target.hostname || target.ip} / {target.ip}</option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential</span>
+                <select
+                  bind:value={taskForm.credentialId}
+                  disabled={taskCredentials.length === 0 || taskRunning}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45 disabled:opacity-50"
+                >
+                  {#each taskCredentials as credential (credential.id)}
+                    <option class="bg-[#0d1316]" value={String(credential.id)}>
+                      {credential.domain ? `${credential.domain}\\` : ""}{credential.username} / {credential.secretType}
+                    </option>
+                  {/each}
+                </select>
+              </label>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="grid gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Method</span>
+                  <select
+                    bind:value={taskForm.method}
+                    disabled={taskRunning}
+                    class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  >
+                    <option class="bg-[#0d1316]" value="wmiexec">wmiexec</option>
+                    <option class="bg-[#0d1316]" value="psexec">psexec</option>
+                  </select>
+                </label>
+
+                <label class="grid gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Timeout</span>
+                  <input
+                    bind:value={taskForm.timeout}
+                    type="number"
+                    min="5"
+                    max="300"
+                    disabled={taskRunning}
+                    class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                  />
+                </label>
+              </div>
+
+              {#if taskForm.method === "psexec"}
+                <p class="rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+                  psexec is noisier than wmiexec and may create a service on the target.
+                </p>
+              {/if}
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Preset</span>
+                <select
+                  bind:value={taskForm.preset}
+                  disabled={taskRunning}
+                  onchange={handleTaskPresetChange}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                >
+                  {#each remoteTaskPresets as preset (preset.id)}
+                    <option class="bg-[#0d1316]" value={preset.id}>{preset.label}</option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Command</span>
+                <textarea
+                  bind:value={taskForm.command}
+                  disabled={taskRunning}
+                  class="min-h-24 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45 disabled:opacity-50"
+                  placeholder="whoami"
+                  oninput={() => (taskForm = { ...taskForm, preset: "custom" })}
+                ></textarea>
+              </label>
+
+              <Button
+                type="button"
+                disabled={!selectedTaskTeam || !taskForm.targetId || !taskForm.credentialId || !taskForm.command.trim() || taskRunning}
+                class="bg-lime-200 text-slate-950 hover:bg-lime-100 disabled:opacity-50"
+                onclick={handleRunRemoteTask}
+              >
+                <Play class="mr-2 h-4 w-4" />
+                {taskRunning ? "Running..." : "Run task"}
+              </Button>
+            </div>
+          </div>
+
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Task runner</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">{selectedTaskTeam || "No team selected"}</h2>
+                <p class="mt-2 text-sm text-white/50">{taskRuns.length} recent runs</p>
+              </div>
+              <Button
+                type="button"
+                disabled={!selectedTaskTeam || taskLoading || taskRunning}
+                class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                onclick={() => selectedTaskTeam && loadRemoteTaskData(selectedTaskTeam)}
+              >
+                Refresh
+              </Button>
+            </div>
+
+            {#if taskLoading}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">Loading task data...</p>
+            {/if}
+            {#if taskError}
+              <p class="mt-5 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">{taskError}</p>
+            {/if}
+            {#if taskTargets.length === 0 && !taskLoading}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">Add targets before running remote tasks.</p>
+            {:else if taskCredentials.length === 0 && !taskLoading}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">Add password, NTLM, or AES256 credentials before running remote tasks.</p>
+            {/if}
+
+            <div class="mt-5">
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Preview</p>
+              <pre class="mt-2 min-h-20 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-4 font-mono text-sm leading-6 text-teal-100">{taskCommandPreview || "Select target, credential, and command."}</pre>
+            </div>
+
+            {#if taskOutput}
+              <div class="mt-5">
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Latest output</p>
+                <pre class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/35 p-4 font-mono text-xs leading-5 text-white/75">{taskOutput}</pre>
+              </div>
+            {/if}
+
+            <div class="mt-6 border-t border-white/10 pt-5">
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Run history</p>
+              {#if taskRuns.length === 0}
+                <p class="mt-3 rounded-md border border-white/10 bg-black/20 px-3 py-4 text-sm text-white/45">No remote task runs yet.</p>
+              {:else}
+                <div class="mt-3 grid gap-3">
+                  {#each taskRuns as run (run.id)}
+                    <div class="rounded-md border border-white/10 bg-black/20 p-3">
+                      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="min-w-0">
+                          <p class="break-words font-mono text-sm text-teal-100">{run.method} / {run.targetLabel} / {run.credentialName}</p>
+                          <p class="mt-1 break-words font-mono text-xs text-white/45">{run.commandPreview}</p>
+                          <p class="mt-2 text-xs text-white/40">{run.startedAt} / {run.status}</p>
+                        </div>
+                        <span class={[
+                          "rounded-md border px-2 py-1 text-xs font-semibold uppercase tracking-[0.16em]",
+                          run.status === "succeeded"
+                            ? "border-lime-200/30 bg-lime-200/10 text-lime-100"
+                            : "border-rose-200/30 bg-rose-200/10 text-rose-100"
+                        ]}>
+                          {run.status}
+                        </span>
+                      </div>
+                      {#if run.output || run.error}
+                        <pre class="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/35 p-3 font-mono text-xs leading-5 text-white/70">{[run.output, run.error ? `Error: ${run.error}` : ""].filter(Boolean).join("\n")}</pre>
+                      {/if}
                     </div>
                   {/each}
                 </div>

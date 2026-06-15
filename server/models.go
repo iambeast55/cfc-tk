@@ -61,6 +61,32 @@ type SaveNetworkPollingConfigRequest struct {
 	IntervalSeconds int  `json:"intervalSeconds"`
 }
 
+type RemoteTaskRun struct {
+	ID             int    `json:"id"`
+	TeamName       string `json:"teamName"`
+	TargetID       int    `json:"targetId"`
+	TargetLabel    string `json:"targetLabel"`
+	TargetAddress  string `json:"targetAddress"`
+	CredentialID   int    `json:"credentialId"`
+	CredentialName string `json:"credentialName"`
+	Method         string `json:"method"`
+	Command        string `json:"command"`
+	CommandPreview string `json:"commandPreview"`
+	Status         string `json:"status"`
+	Output         string `json:"output"`
+	Error          string `json:"error"`
+	StartedAt      string `json:"startedAt"`
+	FinishedAt     string `json:"finishedAt"`
+}
+
+type RunRemoteTaskRequest struct {
+	TargetID     int    `json:"targetId"`
+	CredentialID int    `json:"credentialId"`
+	Method       string `json:"method"`
+	Command      string `json:"command"`
+	Timeout      int    `json:"timeout"`
+}
+
 type AddTargetToTeam struct {
 	Name string `json:"name"`
 	IP   string `json:"ip"`

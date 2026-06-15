@@ -37,6 +37,8 @@ func main() {
 	router.HandleFunc("/api/teams/{name}/notes", saveTeamNotes).Methods("PUT")
 	router.HandleFunc("/api/teams/{name}/network-status", getNetworkStatus).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/network-status/scan", scanNetworkStatus).Methods("POST")
+	router.HandleFunc("/api/teams/{name}/remote-tasks/runs", getRemoteTaskRuns).Methods("GET")
+	router.HandleFunc("/api/teams/{name}/remote-tasks/run", runRemoteTask).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/credentials", getCredentials).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/credentials", createCredential).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/credentials", deleteCredentials).Methods("DELETE")
