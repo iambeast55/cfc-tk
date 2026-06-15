@@ -174,6 +174,7 @@
     customGetTGT: string;
     customTicketer: string;
     customWmiexec: string;
+    customPsexec: string;
     customSmbexec: string;
     customDcomexec: string;
     dcomObject: "ShellBrowserWindow" | "MMC20" | "ShellWindows";
@@ -210,7 +211,7 @@
   }
 
   type TabId = "main" | "easy" | "command" | "tasks" | "notes" | "network" | "credentials";
-  type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
+  type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "psexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-tk.impacketCustomTools";
@@ -302,6 +303,10 @@
   let taskRunning = $state(false);
   let taskError = $state("");
   let taskOutput = $state("");
+  let taskCredentialPickerOpen = $state(false);
+  let taskCredentialSearch = $state("");
+  let taskCredentialScopeFilter = $state<"users" | "all" | "domain" | "local" | "machines">("users");
+  let taskCredentialTypeFilter = $state<"all" | "ntlm" | "password" | "aes">("all");
   let taskForm = $state({
     targetId: "",
     credentialId: "",
@@ -319,6 +324,7 @@
     customGetTGT: "",
     customTicketer: "",
     customWmiexec: "",
+    customPsexec: "",
     customSmbexec: "",
     customDcomexec: "",
     dcomObject: "ShellBrowserWindow",
@@ -404,6 +410,27 @@
   const selectedTaskCredential = $derived(
     taskCredentials.find((credential) => String(credential.id) === taskForm.credentialId)
   );
+  const filteredTaskCredentialOptions = $derived.by(() => {
+    const search = taskCredentialSearch.trim().toLowerCase();
+
+    return taskCredentials.filter((credential) => {
+      const isMachine = credential.username.endsWith("$");
+      const isDomain = Boolean(credential.domain);
+      const typeMatches =
+        taskCredentialTypeFilter === "all" ||
+        (taskCredentialTypeFilter === "ntlm" && (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm")) ||
+        (taskCredentialTypeFilter === "password" && credential.secretType === "password") ||
+        (taskCredentialTypeFilter === "aes" && credential.secretType.includes("aes"));
+      const scopeMatches =
+        taskCredentialScopeFilter === "all" ||
+        (taskCredentialScopeFilter === "users" && !isMachine) ||
+        (taskCredentialScopeFilter === "domain" && isDomain) ||
+        (taskCredentialScopeFilter === "local" && !isDomain) ||
+        (taskCredentialScopeFilter === "machines" && isMachine);
+
+      return typeMatches && scopeMatches && (!search || credentialSearchText(credential).includes(search));
+    });
+  });
   const groupedTargets = $derived.by(() => {
     const groups = new Map<string, Target[]>();
     for (const target of targets) {
@@ -621,7 +648,7 @@
     if (!target || !credential || !taskForm.command.trim()) {
       return "";
     }
-    return `impacket-${taskForm.method} ${taskCredentialPreview(credential, target)} ${taskForm.command.trim()}`;
+    return `${impacketToolName(taskForm.method)} ${taskCredentialPreview(credential, target)} ${taskForm.command.trim()}`;
   });
 
   const readError = async (response: Response, fallback: string) => {
@@ -686,6 +713,7 @@
     if (tool === "getTGT") return commandForm.customGetTGT.trim() || "impacket-getTGT";
     if (tool === "ticketer") return commandForm.customTicketer.trim() || "impacket-ticketer";
     if (tool === "wmiexec") return commandForm.customWmiexec.trim() || "impacket-wmiexec";
+    if (tool === "psexec") return commandForm.customPsexec.trim() || "impacket-psexec";
     if (tool === "smbexec") return commandForm.customSmbexec.trim() || "impacket-smbexec";
     return commandForm.customDcomexec.trim() || "impacket-dcomexec";
   };
@@ -1287,6 +1315,7 @@
           targetId: Number(taskForm.targetId),
           credentialId: Number(taskForm.credentialId),
           method: taskForm.method,
+          toolCommand: impacketToolName(taskForm.method),
           command: taskForm.command.trim(),
           timeout: Number(taskForm.timeout) || 60
         })
@@ -1476,6 +1505,7 @@
         getTGT: commandForm.customGetTGT,
         ticketer: commandForm.customTicketer,
         wmiexec: commandForm.customWmiexec,
+        psexec: commandForm.customPsexec,
         smbexec: commandForm.customSmbexec,
         dcomexec: commandForm.customDcomexec
       })
@@ -1500,6 +1530,7 @@
           customGetTGT: customTools.getTGT ?? commandForm.customGetTGT,
           customTicketer: customTools.ticketer ?? commandForm.customTicketer,
           customWmiexec: customTools.wmiexec ?? commandForm.customWmiexec,
+          customPsexec: customTools.psexec ?? commandForm.customPsexec,
           customSmbexec: customTools.smbexec ?? commandForm.customSmbexec,
           customDcomexec: customTools.dcomexec ?? commandForm.customDcomexec
         };
@@ -2823,6 +2854,14 @@
                     />
                   </label>
                   <label class="grid min-w-0 gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">psexec</span>
+                    <input
+                      bind:value={commandForm.customPsexec}
+                      class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                      placeholder="impacket-psexec"
+                    />
+                  </label>
+                  <label class="grid min-w-0 gap-2">
                     <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">smbexec</span>
                     <input
                       bind:value={commandForm.customSmbexec}
@@ -3288,20 +3327,24 @@
                 </select>
               </label>
 
-              <label class="grid gap-2">
+              <div class="grid gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential</span>
-                <select
-                  bind:value={taskForm.credentialId}
+                <button
+                  type="button"
                   disabled={taskCredentials.length === 0 || taskRunning}
-                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45 disabled:opacity-50"
+                  class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-left text-sm text-white outline-none transition hover:border-lime-200/35 disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={() => (taskCredentialPickerOpen = true)}
                 >
-                  {#each taskCredentials as credential (credential.id)}
-                    <option class="bg-[#0d1316]" value={String(credential.id)}>
-                      {credential.domain ? `${credential.domain}\\` : ""}{credential.username} / {credential.secretType}
-                    </option>
-                  {/each}
-                </select>
-              </label>
+                  {#if selectedTaskCredential}
+                    <span class="block truncate font-mono text-teal-100">{credentialIdentity(selectedTaskCredential)}</span>
+                    <span class="mt-1 block truncate text-xs text-white/45">
+                      {selectedTaskCredential.secretType} / {credentialSecretHint(selectedTaskCredential)}
+                    </span>
+                  {:else}
+                    <span class="text-white/40">Choose a credential</span>
+                  {/if}
+                </button>
+              </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
                 <label class="grid gap-2">
@@ -3328,6 +3371,38 @@
                   />
                 </label>
               </div>
+
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Impacket command style</span>
+                <select
+                  bind:value={commandForm.impacketStyle}
+                  disabled={taskRunning}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45"
+                >
+                  <option class="bg-[#0d1316]" value="kali">Kali package: impacket-*</option>
+                  <option class="bg-[#0d1316]" value="pythonScripts">Python scripts: *.py</option>
+                  <option class="bg-[#0d1316]" value="custom">Custom command names</option>
+                </select>
+              </label>
+
+              {#if commandForm.impacketStyle === "custom"}
+                <label class="grid gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">{taskForm.method} command</span>
+                  <input
+                    value={taskForm.method === "wmiexec" ? commandForm.customWmiexec : commandForm.customPsexec}
+                    oninput={(event) => {
+                      if (taskForm.method === "wmiexec") {
+                        commandForm = { ...commandForm, customWmiexec: event.currentTarget.value };
+                      } else {
+                        commandForm = { ...commandForm, customPsexec: event.currentTarget.value };
+                      }
+                    }}
+                    disabled={taskRunning}
+                    class="rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45"
+                    placeholder={taskForm.method === "wmiexec" ? "impacket-wmiexec" : "impacket-psexec"}
+                  />
+                </label>
+              {/if}
 
               {#if taskForm.method === "psexec"}
                 <p class="rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
@@ -3957,6 +4032,101 @@
                     onclick={() => {
                       easyMode = { ...easyMode, credentialId: String(credential.id) };
                       easyCredentialPickerOpen = false;
+                    }}
+                  >
+                    <span class="block truncate font-mono text-sm text-teal-100">{credentialIdentity(credential)}</span>
+                    <span class="mt-1 block text-xs text-white/50">
+                      {credential.secretType} / {credentialSecretHint(credential)} / added {credentialAddedLabel(credential)}
+                    </span>
+                    {#if credentialContextLabel(credential)}
+                      <span class="mt-1 block text-xs text-white/35">{credentialContextLabel(credential)}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if taskCredentialPickerOpen}
+      <div class="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6">
+        <div class="grid max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-md border border-lime-300/20 bg-[#111719]">
+          <div class="border-b border-white/10 p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-lime-200/60">Task credential</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">Choose for remote task</h2>
+                <p class="mt-2 text-sm text-white/55">Search credentials supported by wmiexec and psexec.</p>
+              </div>
+              <Button
+                type="button"
+                class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+                onclick={() => (taskCredentialPickerOpen = false)}
+              >
+                Close
+              </Button>
+            </div>
+
+            <div class="mt-4 grid gap-3">
+              <input
+                bind:value={taskCredentialSearch}
+                class="w-full min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45"
+                placeholder="Search user, domain, RID, host, IP, type, hash suffix"
+              />
+              <div class="flex flex-wrap gap-2">
+                {#each credentialScopeFilters as scope}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition",
+                      taskCredentialScopeFilter === scope
+                        ? "border-lime-200/60 bg-lime-200/15 text-lime-100"
+                        : "border-white/10 bg-white/[0.04] text-white/55 hover:border-lime-200/35"
+                    ]}
+                    onclick={() => (taskCredentialScopeFilter = scope)}
+                  >
+                    {scope}
+                  </button>
+                {/each}
+              </div>
+              <div class="flex flex-wrap gap-2">
+                {#each credentialTypeFilters as type}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition",
+                      taskCredentialTypeFilter === type
+                        ? "border-teal-200/60 bg-teal-200/15 text-teal-100"
+                        : "border-white/10 bg-white/[0.04] text-white/55 hover:border-teal-200/35"
+                    ]}
+                    onclick={() => (taskCredentialTypeFilter = type)}
+                  >
+                    {type}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          </div>
+
+          <div class="min-h-0 overflow-y-auto p-3">
+            {#if filteredTaskCredentialOptions.length === 0}
+              <p class="rounded-md border border-white/10 bg-black/20 p-5 text-sm text-white/55">No credentials match those filters.</p>
+            {:else}
+              <div class="grid gap-2">
+                {#each filteredTaskCredentialOptions as credential (credential.id)}
+                  <button
+                    type="button"
+                    class={[
+                      "rounded-md border px-3 py-3 text-left transition",
+                      taskForm.credentialId === String(credential.id)
+                        ? "border-lime-200/60 bg-lime-200/12"
+                        : "border-white/10 bg-white/[0.035] hover:border-lime-200/35 hover:bg-lime-200/10"
+                    ]}
+                    onclick={() => {
+                      taskForm = { ...taskForm, credentialId: String(credential.id) };
+                      taskCredentialPickerOpen = false;
                     }}
                   >
                     <span class="block truncate font-mono text-sm text-teal-100">{credentialIdentity(credential)}</span>

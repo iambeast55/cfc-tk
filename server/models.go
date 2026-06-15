@@ -83,6 +83,7 @@ type RunRemoteTaskRequest struct {
 	TargetID     int    `json:"targetId"`
 	CredentialID int    `json:"credentialId"`
 	Method       string `json:"method"`
+	ToolCommand  string `json:"toolCommand"`
 	Command      string `json:"command"`
 	Timeout      int    `json:"timeout"`
 }

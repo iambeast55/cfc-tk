@@ -23,14 +23,15 @@ func TestBuildRemoteTaskCommandRedactsPassword(t *testing.T) {
 	}
 
 	command, err := buildRemoteTaskCommand(target, credential, RunRemoteTaskRequest{
-		Method:  "wmiexec",
-		Command: "whoami",
+		Method:      "wmiexec",
+		ToolCommand: "wmiexec.py",
+		Command:     "whoami",
 	})
 	if err != nil {
 		t.Fatalf("build command: %v", err)
 	}
 
-	if command.Tool != "impacket-wmiexec" {
+	if command.Tool != "wmiexec.py" {
 		t.Fatalf("unexpected tool: %s", command.Tool)
 	}
 	if !strings.Contains(strings.Join(command.Args, " "), "SuperSecret!") {
@@ -39,7 +40,7 @@ func TestBuildRemoteTaskCommandRedactsPassword(t *testing.T) {
 	if strings.Contains(command.Preview, "SuperSecret!") {
 		t.Fatalf("preview leaked password: %s", command.Preview)
 	}
-	if !strings.Contains(command.Preview, "CORP/administrator:<redacted>@10.0.0.5") {
+	if !strings.Contains(command.Preview, "wmiexec.py CORP/administrator:<redacted>@10.0.0.5") {
 		t.Fatalf("unexpected preview: %s", command.Preview)
 	}
 }

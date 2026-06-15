@@ -108,7 +108,10 @@ func buildRemoteTaskCommand(target Target, credential Credential, req RunRemoteT
 		return nil, ErrUnsupportedRemoteTaskMethod
 	}
 
-	tool := "impacket-" + method
+	tool := strings.TrimSpace(req.ToolCommand)
+	if tool == "" {
+		tool = "impacket-" + method
+	}
 	args := []string{}
 	previewArgs := []string{}
 	targetSpec, previewSpec, err := remoteTaskTargetSpec(credential, target)
