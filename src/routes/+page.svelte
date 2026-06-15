@@ -57,6 +57,28 @@
     updatedAt: string;
   }
 
+  type AccessMethod = "SMB" | "Dump" | "Exec" | "WinRM" | "RDP" | "LDAP" | "DCOM" | "Kerberos";
+  type AccessConfidence = "high" | "medium" | "low";
+
+  interface AccessBadge {
+    method: AccessMethod;
+    confidence: AccessConfidence;
+    reason: string;
+  }
+
+  interface AccessCell {
+    target: Target;
+    openPorts: OpenPort[];
+    badges: AccessBadge[];
+  }
+
+  interface AccessRow {
+    credential: Credential;
+    cells: AccessCell[];
+    badgeCount: number;
+    hasKerberosCache: boolean;
+  }
+
   interface Credential {
     id: number;
     teamName: string;
@@ -189,7 +211,7 @@
     credentialId: string;
   }
 
-  type TabId = "main" | "easy" | "command" | "notes" | "network" | "credentials";
+  type TabId = "main" | "easy" | "command" | "notes" | "network" | "access" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
   const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
@@ -273,6 +295,18 @@
   let networkConfigLoading = $state(false);
   let networkConfigSaving = $state(false);
   let networkConfigError = $state("");
+  let selectedAccessTeam = $state("");
+  let lastLoadedAccessTeam = $state("");
+  let accessTargets = $state<Target[]>([]);
+  let accessCredentials = $state<Credential[]>([]);
+  let accessKerberosCaches = $state<KerberosCache[]>([]);
+  let accessNetworkStatus = $state<TeamNetworkStatus | null>(null);
+  let accessLoading = $state(false);
+  let accessError = $state("");
+  let accessMethodFilter = $state<"all" | AccessMethod>("all");
+  let accessTypeFilter = $state<"all" | "password" | "ntlm" | "aes">("all");
+  let accessHideMachineAccounts = $state(true);
+  let accessOnlyPossible = $state(true);
   let impacketPreferenceReady = $state(false);
   let commandForm = $state<CommandForm>({
     teamName: "",
@@ -340,6 +374,7 @@
     { id: "command", label: "Command", eyebrow: "run" },
     { id: "notes", label: "Notes", eyebrow: "field" },
     { id: "network", label: "Network", eyebrow: "status" },
+    { id: "access", label: "Access", eyebrow: "matrix" },
     { id: "credentials", label: "Credentials", eyebrow: "vault" }
   ];
 
@@ -351,6 +386,7 @@
   const networkOpenPortCount = $derived(
     networkStatus?.targets.reduce((total, item) => total + (item.openPorts?.length ?? 0), 0) ?? 0
   );
+  const accessMethods: AccessMethod[] = ["SMB", "Dump", "Exec", "WinRM", "RDP", "LDAP", "DCOM", "Kerberos"];
   const groupedTargets = $derived.by(() => {
     const groups = new Map<string, Target[]>();
     for (const target of targets) {
@@ -568,6 +604,141 @@
     };
     return `${port.port} ${port.service || names[port.port] || ""}`.trim();
   };
+
+  const credentialMaterialType = (credential: Credential) => {
+    if (credential.secretType === "password") return "password";
+    if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") return "ntlm";
+    if (credential.secretType.includes("aes")) return "aes";
+    return "other";
+  };
+
+  const credentialHasPasswordOrHash = (credential: Credential) => {
+    const type = credentialMaterialType(credential);
+    return type === "password" || type === "ntlm";
+  };
+
+  const credentialHasPassword = (credential: Credential) => credentialMaterialType(credential) === "password";
+  const credentialHasDomainContext = (credential: Credential) => Boolean(credential.domain.trim());
+
+  const credentialMatchesTargetContext = (credential: Credential, target: Target) => {
+    const credentialDomain = credential.domain.trim().toLowerCase();
+    const credentialHost = credential.host.trim().toLowerCase();
+    const credentialIp = credential.ip.trim();
+    const targetDomain = target.domainName.trim().toLowerCase();
+    const targetHost = target.hostname.trim().toLowerCase();
+
+    return (
+      (credentialDomain && targetDomain && credentialDomain === targetDomain) ||
+      (credentialHost && targetHost && credentialHost === targetHost) ||
+      (credentialHost && credentialHost === target.ip.toLowerCase()) ||
+      (credentialIp && credentialIp === target.ip)
+    );
+  };
+
+  const accessConfidence = (credential: Credential, target: Target): AccessConfidence => {
+    if (credentialMatchesTargetContext(credential, target)) return "high";
+    if (credential.domain && target.domainName && credential.domain.toLowerCase() === target.domainName.toLowerCase()) {
+      return "high";
+    }
+    if (credential.domain || target.domainName) return "medium";
+    return "low";
+  };
+
+  const credentialHasAvailableKerberosCache = (credential: Credential) =>
+    accessKerberosCaches.some(
+      (cache) =>
+        cache.status === "available" &&
+        cache.username.toLowerCase() === credential.username.toLowerCase() &&
+        (!credential.domain || cache.domain.toLowerCase() === credential.domain.toLowerCase())
+    );
+
+  const inferAccessBadges = (
+    credential: Credential,
+    target: Target,
+    openPorts: OpenPort[],
+    hasKerberosCache: boolean
+  ): AccessBadge[] => {
+    const ports = new Set(openPorts.map((port) => port.port));
+    const confidence = accessConfidence(credential, target);
+    const badges: AccessBadge[] = [];
+    const addBadge = (method: AccessMethod, reason: string, overrideConfidence: AccessConfidence = confidence) => {
+      if (!badges.some((badge) => badge.method === method)) {
+        badges.push({ method, confidence: overrideConfidence, reason });
+      }
+    };
+
+    if (ports.has(445) && credentialHasPasswordOrHash(credential)) {
+      addBadge("SMB", "SMB is open and credential has password or NTLM material.");
+      addBadge("Dump", "SMB is open and credential may work with secretsdump.");
+      addBadge("Exec", "SMB is open and credential may work with smbexec.");
+    }
+
+    if (ports.has(139) && credentialHasPasswordOrHash(credential)) {
+      addBadge("SMB", "NetBIOS/SMB port is open and credential has usable material.", confidence === "low" ? "low" : "medium");
+    }
+
+    if (ports.has(5985) && credentialHasPasswordOrHash(credential)) {
+      addBadge("WinRM", "WinRM is open and credential has password or NTLM material.");
+    }
+
+    if (ports.has(3389) && credentialHasPassword(credential)) {
+      addBadge("RDP", "RDP is open and credential has a password.");
+    }
+
+    if (ports.has(389) && credentialHasDomainContext(credential)) {
+      addBadge("LDAP", "LDAP is open and credential has domain context.");
+    }
+
+    if (ports.has(135) && target.os === "windows" && credentialHasPasswordOrHash(credential)) {
+      addBadge("DCOM", "RPC is open on a Windows target and credential has usable material.");
+    }
+
+    if (hasKerberosCache && (target.domainName || credential.domain)) {
+      addBadge("Kerberos", "An available Kerberos cache matches this credential.", confidence === "low" ? "medium" : confidence);
+    }
+
+    return badges;
+  };
+
+  const accessBadgeClass = (confidence: AccessConfidence) => [
+    "rounded-md border px-2 py-1 font-mono text-xs",
+    confidence === "high"
+      ? "border-lime-200/35 bg-lime-200/10 text-lime-100"
+      : confidence === "medium"
+        ? "border-teal-200/35 bg-teal-200/10 text-teal-100"
+        : "border-white/10 bg-white/[0.05] text-white/55"
+  ];
+
+  const accessRows = $derived.by(() => {
+    const networkPortsByTarget = new Map<number, OpenPort[]>();
+    for (const item of accessNetworkStatus?.targets ?? []) {
+      networkPortsByTarget.set(item.target.id, item.openPorts ?? []);
+    }
+
+    return accessCredentials
+      .filter((credential) => {
+        if (accessHideMachineAccounts && credential.username.endsWith("$")) return false;
+        if (accessTypeFilter === "all") return true;
+        return credentialMaterialType(credential) === accessTypeFilter;
+      })
+      .map((credential): AccessRow => {
+        const hasKerberosCache = credentialHasAvailableKerberosCache(credential);
+        const cells = accessTargets.map((target) => {
+          const openPorts = networkPortsByTarget.get(target.id) ?? [];
+          const allBadges = inferAccessBadges(credential, target, openPorts, hasKerberosCache);
+          const badges =
+            accessMethodFilter === "all"
+              ? allBadges
+              : allBadges.filter((badge) => badge.method === accessMethodFilter);
+          return { target, openPorts, badges };
+        });
+        const badgeCount = cells.reduce((total, cell) => total + cell.badges.length, 0);
+        return { credential, cells, badgeCount, hasKerberosCache };
+      })
+      .filter((row) => !accessOnlyPossible || row.badgeCount > 0);
+  });
+
+  const accessBadgeTotal = $derived(accessRows.reduce((total, row) => total + row.badgeCount, 0));
 
   const isValidIp = (value: string) => {
     const trimmed = value.trim();
@@ -888,6 +1059,67 @@
     }
   };
 
+  const loadAccessMatrixData = async (teamName: string) => {
+    accessLoading = true;
+    accessError = "";
+
+    try {
+      const [targetsResponse, credentialsResponse, cachesResponse, networkResponse] = await Promise.all([
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/targets`),
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/credentials`),
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/kerberos-caches`),
+        fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/network-status`)
+      ]);
+
+      if (!targetsResponse.ok) {
+        accessError = await readError(targetsResponse, "Could not load access targets.");
+        accessTargets = [];
+        accessCredentials = [];
+        accessKerberosCaches = [];
+        accessNetworkStatus = null;
+        return;
+      }
+      if (!credentialsResponse.ok) {
+        accessError = await readError(credentialsResponse, "Could not load access credentials.");
+        accessTargets = [];
+        accessCredentials = [];
+        accessKerberosCaches = [];
+        accessNetworkStatus = null;
+        return;
+      }
+      if (!cachesResponse.ok) {
+        accessError = await readError(cachesResponse, "Could not load Kerberos caches.");
+        accessKerberosCaches = [];
+      }
+
+      const nextTargets = (await targetsResponse.json()) as Target[];
+      const nextCredentials = (await credentialsResponse.json()) as Credential[];
+      const nextCaches = cachesResponse.ok ? ((await cachesResponse.json()) as KerberosCache[]) : [];
+      const nextNetworkStatus = networkResponse.ok ? ((await networkResponse.json()) as TeamNetworkStatus) : null;
+
+      if (selectedAccessTeam !== teamName) return;
+      accessTargets = nextTargets;
+      accessCredentials = nextCredentials;
+      accessKerberosCaches = nextCaches;
+      accessNetworkStatus = nextNetworkStatus;
+      if (!networkResponse.ok) {
+        accessError = await readError(networkResponse, "Network status unavailable; suggestions are weaker.");
+      } else if (nextNetworkStatus?.lastError) {
+        accessError = nextNetworkStatus.lastError;
+      }
+    } catch (error) {
+      accessError = error instanceof Error ? error.message : "Could not load access matrix.";
+      accessTargets = [];
+      accessCredentials = [];
+      accessKerberosCaches = [];
+      accessNetworkStatus = null;
+    } finally {
+      if (selectedAccessTeam === teamName) {
+        accessLoading = false;
+      }
+    }
+  };
+
   const loadCommandCredentials = async (teamName: string) => {
     commandCredentialsLoading = true;
 
@@ -1147,6 +1379,12 @@
       if (selectedNetworkTeam) selectedNetworkTeam = "";
       if (networkStatus) networkStatus = null;
       networkError = "";
+      if (selectedAccessTeam) selectedAccessTeam = "";
+      if (accessTargets.length > 0) accessTargets = [];
+      if (accessCredentials.length > 0) accessCredentials = [];
+      if (accessKerberosCaches.length > 0) accessKerberosCaches = [];
+      if (accessNetworkStatus) accessNetworkStatus = null;
+      accessError = "";
       return;
     }
 
@@ -1172,6 +1410,10 @@
 
     if (!selectedNetworkTeam || !teams.some((team) => team.name === selectedNetworkTeam)) {
       selectedNetworkTeam = teams[0].name;
+    }
+
+    if (!selectedAccessTeam || !teams.some((team) => team.name === selectedAccessTeam)) {
+      selectedAccessTeam = teams[0].name;
     }
   });
 
@@ -1243,6 +1485,18 @@
     networkStatus = null;
     networkError = "";
     void loadNetworkStatus(selectedNetworkTeam);
+  });
+
+  $effect(() => {
+    if (!selectedAccessTeam) return;
+    if (selectedAccessTeam === lastLoadedAccessTeam) return;
+    lastLoadedAccessTeam = selectedAccessTeam;
+    accessTargets = [];
+    accessCredentials = [];
+    accessKerberosCaches = [];
+    accessNetworkStatus = null;
+    accessError = "";
+    void loadAccessMatrixData(selectedAccessTeam);
   });
 
   $effect(() => {
@@ -3231,6 +3485,160 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        </section>
+      {:else if activeTab === "access"}
+        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
+            <ShieldCheck class="h-6 w-6 text-lime-100" />
+            <h2 class="mt-4 text-xl font-semibold text-white">Access Matrix</h2>
+            <p class="mt-2 text-sm leading-6 text-white/60">
+              Infer likely paths from credentials, targets, Kerberos caches, and open ports.
+            </p>
+
+            <label class="mt-5 block">
+              <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
+              <select
+                bind:value={selectedAccessTeam}
+                disabled={teams.length === 0 || accessLoading}
+                class="mt-2 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-lime-200/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {#each teams as team (team.name)}
+                  <option class="bg-[#0d1316]" value={team.name}>{team.name}</option>
+                {/each}
+              </select>
+            </label>
+
+            <div class="mt-4 grid gap-3 rounded-md border border-white/10 bg-white/[0.035] p-3">
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Method</span>
+                <select
+                  bind:value={accessMethodFilter}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-lime-200/50"
+                >
+                  <option class="bg-[#0d1316]" value="all">All methods</option>
+                  {#each accessMethods as method}
+                    <option class="bg-[#0d1316]" value={method}>{method}</option>
+                  {/each}
+                </select>
+              </label>
+              <label class="grid gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential type</span>
+                <select
+                  bind:value={accessTypeFilter}
+                  class="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-lime-200/50"
+                >
+                  <option class="bg-[#0d1316]" value="all">All types</option>
+                  <option class="bg-[#0d1316]" value="password">Password</option>
+                  <option class="bg-[#0d1316]" value="ntlm">NTLM</option>
+                  <option class="bg-[#0d1316]" value="aes">AES</option>
+                </select>
+              </label>
+              <label class="flex items-center justify-between gap-3 text-sm text-white/75">
+                <span>Hide machine accounts</span>
+                <input type="checkbox" bind:checked={accessHideMachineAccounts} class="h-4 w-4 accent-lime-200" />
+              </label>
+              <label class="flex items-center justify-between gap-3 text-sm text-white/75">
+                <span>Only possible access</span>
+                <input type="checkbox" bind:checked={accessOnlyPossible} class="h-4 w-4 accent-lime-200" />
+              </label>
+            </div>
+
+            <Button
+              type="button"
+              disabled={!selectedAccessTeam || accessLoading}
+              class="mt-4 w-full border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]"
+              onclick={() => selectedAccessTeam && loadAccessMatrixData(selectedAccessTeam)}
+            >
+              Refresh matrix
+            </Button>
+          </div>
+
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Inferred access</p>
+                <h2 class="mt-2 text-xl font-semibold text-white">{selectedAccessTeam || "No team selected"}</h2>
+                <p class="mt-2 text-sm text-white/50">
+                  {accessRows.length} credential rows / {accessBadgeTotal} suggested methods
+                </p>
+              </div>
+              <div class="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/50">
+                Network scan: {accessNetworkStatus?.lastScannedAt || "not scanned yet"}
+              </div>
+            </div>
+
+            {#if accessError}
+              <p class="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">{accessError}</p>
+            {/if}
+
+            {#if accessLoading}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-6 text-sm text-white/55">Loading access matrix...</p>
+            {:else if accessTargets.length === 0}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-6 text-sm text-white/55">Add targets before building an access matrix.</p>
+            {:else if accessCredentials.length === 0}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-6 text-sm text-white/55">Add or dump credentials before building an access matrix.</p>
+            {:else if accessRows.length === 0}
+              <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-6 text-sm text-white/55">No credentials match the current filters.</p>
+            {:else}
+              <div class="mt-5 overflow-x-auto rounded-md border border-white/10">
+                <table class="w-full min-w-[1080px] border-collapse text-left text-sm">
+                  <thead class="bg-white/[0.045] text-xs uppercase tracking-[0.18em] text-white/45">
+                    <tr>
+                      <th class="w-[260px] px-3 py-3 font-semibold">Credential</th>
+                      {#each accessTargets as target (target.id)}
+                        <th class="min-w-[220px] px-3 py-3 font-semibold">
+                          <span class="block text-white/65">{target.hostname || target.ip}</span>
+                          <span class="mt-1 block font-mono text-[11px] normal-case tracking-normal text-teal-100/75">{target.ip}</span>
+                        </th>
+                      {/each}
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-white/10">
+                    {#each accessRows as row (row.credential.id)}
+                      <tr class="align-top transition hover:bg-white/[0.035]">
+                        <td class="px-3 py-3">
+                          <p class="break-words font-mono text-sm text-white">
+                            {row.credential.domain ? `${row.credential.domain}\\` : ""}{row.credential.username}
+                          </p>
+                          <p class="mt-1 text-xs text-white/45">
+                            {row.credential.secretType}{row.credential.rid ? ` / RID ${row.credential.rid}` : ""}{row.hasKerberosCache ? " / cache" : ""}
+                          </p>
+                          {#if credentialContextLabel(row.credential)}
+                            <p class="mt-1 text-xs text-white/35">{credentialContextLabel(row.credential)}</p>
+                          {/if}
+                        </td>
+                        {#each row.cells as cell (`${row.credential.id}-${cell.target.id}`)}
+                          <td class="px-3 py-3">
+                            {#if cell.badges.length}
+                              <div class="flex flex-wrap gap-2">
+                                {#each cell.badges as badge (`${cell.target.id}-${badge.method}`)}
+                                  <span class={accessBadgeClass(badge.confidence)} title={badge.reason}>
+                                    {badge.method}
+                                  </span>
+                                {/each}
+                              </div>
+                              {#if cell.openPorts.length}
+                                <p class="mt-2 text-[11px] text-white/35">
+                                  Open: {cell.openPorts.map(openPortLabel).join(", ")}
+                                </p>
+                              {/if}
+                            {:else}
+                              <span class="text-white/30">-</span>
+                            {/if}
+                          </td>
+                        {/each}
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+              <div class="mt-4 flex flex-wrap gap-2 text-xs">
+                <span class="rounded-md border border-lime-200/35 bg-lime-200/10 px-2 py-1 text-lime-100">High context match</span>
+                <span class="rounded-md border border-teal-200/35 bg-teal-200/10 px-2 py-1 text-teal-100">Medium inferred</span>
+                <span class="rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-white/55">Low generic</span>
+              </div>
+            {/if}
           </div>
         </section>
       {:else}
