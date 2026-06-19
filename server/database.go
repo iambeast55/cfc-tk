@@ -190,6 +190,33 @@ func initDB() error {
 		return err
 	}
 
+	createRemoteTaskRunsTableSQL := `
+	CREATE TABLE IF NOT EXISTS remote_task_runs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		team_name TEXT NOT NULL,
+		target_id INTEGER NOT NULL,
+		target_label TEXT NOT NULL,
+		target_address TEXT NOT NULL,
+		credential_id INTEGER NOT NULL,
+		credential_name TEXT NOT NULL,
+		method TEXT NOT NULL,
+		command TEXT NOT NULL,
+		command_preview TEXT NOT NULL,
+		status TEXT NOT NULL,
+		output TEXT DEFAULT '',
+		error TEXT DEFAULT '',
+		started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		finished_at TEXT DEFAULT '',
+		FOREIGN KEY(team_name) REFERENCES teams(name) ON DELETE CASCADE,
+		FOREIGN KEY(target_id) REFERENCES targets(id) ON DELETE CASCADE,
+		FOREIGN KEY(credential_id) REFERENCES credentials(id) ON DELETE CASCADE
+	);
+	`
+
+	if _, err = db.Exec(createRemoteTaskRunsTableSQL); err != nil {
+		return err
+	}
+
 	createKerberosCachesTableSQL := `
 	CREATE TABLE IF NOT EXISTS kerberos_caches (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -538,6 +565,107 @@ func SaveNetworkPollingConfig(req SaveNetworkPollingConfigRequest) (*NetworkPoll
 	}
 
 	return GetNetworkPollingConfig()
+}
+
+func CreateRemoteTaskRun(run RemoteTaskRun) (*RemoteTaskRun, error) {
+	result, err := db.Exec(`
+		INSERT INTO remote_task_runs (
+			team_name, target_id, target_label, target_address, credential_id, credential_name,
+			method, command, command_preview, status, output, error, finished_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, run.TeamName, run.TargetID, run.TargetLabel, run.TargetAddress, run.CredentialID, run.CredentialName,
+		run.Method, run.Command, run.CommandPreview, run.Status, run.Output, run.Error, run.FinishedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	return GetRemoteTaskRunByID(int(id))
+}
+
+func GetRemoteTaskRunsByTeamName(teamName string) ([]RemoteTaskRun, error) {
+	if _, err := GetTeamByName(teamName); err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(`
+		SELECT id, team_name, target_id, target_label, target_address, credential_id, credential_name,
+			method, command, command_preview, status, output, error, started_at, COALESCE(finished_at, '')
+		FROM remote_task_runs
+		WHERE team_name = ?
+		ORDER BY started_at DESC, id DESC
+		LIMIT 50
+	`, teamName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []RemoteTaskRun
+	for rows.Next() {
+		var run RemoteTaskRun
+		if err := rows.Scan(
+			&run.ID,
+			&run.TeamName,
+			&run.TargetID,
+			&run.TargetLabel,
+			&run.TargetAddress,
+			&run.CredentialID,
+			&run.CredentialName,
+			&run.Method,
+			&run.Command,
+			&run.CommandPreview,
+			&run.Status,
+			&run.Output,
+			&run.Error,
+			&run.StartedAt,
+			&run.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return runs, nil
+}
+
+func GetRemoteTaskRunByID(id int) (*RemoteTaskRun, error) {
+	var run RemoteTaskRun
+	err := db.QueryRow(`
+		SELECT id, team_name, target_id, target_label, target_address, credential_id, credential_name,
+			method, command, command_preview, status, output, error, started_at, COALESCE(finished_at, '')
+		FROM remote_task_runs
+		WHERE id = ?
+	`, id).Scan(
+		&run.ID,
+		&run.TeamName,
+		&run.TargetID,
+		&run.TargetLabel,
+		&run.TargetAddress,
+		&run.CredentialID,
+		&run.CredentialName,
+		&run.Method,
+		&run.Command,
+		&run.CommandPreview,
+		&run.Status,
+		&run.Output,
+		&run.Error,
+		&run.StartedAt,
+		&run.FinishedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &run, nil
 }
 
 func GetCredentialsByTeamName(teamName string) ([]Credential, error) {
