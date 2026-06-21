@@ -73,6 +73,65 @@ func TestBuildRemoteTaskCommandUsesHashOption(t *testing.T) {
 	}
 }
 
+func TestBuildRemoteTaskCommandUsesKerberosRules(t *testing.T) {
+	target := Target{
+		ID:         1,
+		TeamName:   "blue",
+		Hostname:   "host01",
+		DomainName: "corp.local",
+		IP:         "10.0.0.5",
+		OS:         "windows",
+	}
+	credential := Credential{
+		ID:         2,
+		TeamName:   "blue",
+		Username:   "administrator",
+		Domain:     "CORP.LOCAL",
+		SecretType: "kerberos-aes256",
+		Secret:     "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+	}
+
+	command, err := buildRemoteTaskCommand(target, credential, RunRemoteTaskRequest{
+		Method:  "wmiexec",
+		Command: "whoami",
+		KDCHost: "10.0.0.10",
+	})
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+
+	joined := strings.Join(command.Args, " ")
+	for _, snippet := range []string{
+		"-k",
+		"-dc-ip 10.0.0.10",
+		"-aesKey " + credential.Secret,
+		"CORP.LOCAL/administrator@host01.corp.local",
+	} {
+		if !strings.Contains(joined, snippet) {
+			t.Fatalf("missing %q in args: %s", snippet, joined)
+		}
+	}
+	if !strings.Contains(command.Preview, "-k -dc-ip 10.0.0.10 -aesKey <redacted> CORP.LOCAL/administrator@host01.corp.local whoami") {
+		t.Fatalf("unexpected preview: %s", command.Preview)
+	}
+	if command.Address != "host01.corp.local" {
+		t.Fatalf("unexpected address: %s", command.Address)
+	}
+}
+
+func TestBuildRemoteTaskCommandRequiresKDCForKerberos(t *testing.T) {
+	target := Target{ID: 1, TeamName: "blue", Hostname: "host01", DomainName: "corp.local", IP: "10.0.0.5", OS: "windows"}
+	credential := Credential{ID: 2, TeamName: "blue", Username: "administrator", SecretType: "kerberos-aes256", Secret: "abc"}
+
+	_, err := buildRemoteTaskCommand(target, credential, RunRemoteTaskRequest{
+		Method:  "wmiexec",
+		Command: "whoami",
+	})
+	if err == nil {
+		t.Fatal("expected missing KDC host error")
+	}
+}
+
 func TestRemoteTaskRunHistoryPersistence(t *testing.T) {
 	setupTestDB(t)
 

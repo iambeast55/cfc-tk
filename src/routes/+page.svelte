@@ -310,6 +310,8 @@
   let taskForm = $state({
     targetId: "",
     credentialId: "",
+    kdcTargetId: "",
+    kdcHost: "",
     method: "wmiexec" as "wmiexec" | "psexec",
     preset: "whoami",
     command: "whoami",
@@ -407,9 +409,32 @@
   const selectedTaskTarget = $derived(
     taskTargets.find((target) => String(target.id) === taskForm.targetId)
   );
+  const selectedTaskKdcTarget = $derived(
+    taskTargets.find((target) => String(target.id) === taskForm.kdcTargetId)
+  );
   const selectedTaskCredential = $derived(
     taskCredentials.find((credential) => String(credential.id) === taskForm.credentialId)
   );
+  const taskCredentialAuthMode = $derived.by(() => {
+    if (!selectedTaskCredential) return "password";
+    if (selectedTaskCredential.secretType === "password") return "password";
+    if (selectedTaskCredential.secretType === "ntlm" || selectedTaskCredential.secretType === "kerberos-ntlm") return "hash";
+    return "kerberos";
+  });
+  const taskNeedsKerberosOptions = $derived(taskCredentialAuthMode === "kerberos");
+  const taskTargetFqdn = $derived.by(() => {
+    if (!selectedTaskTarget) return "";
+    const hostname = selectedTaskTarget.hostname.trim();
+    const domainName = selectedTaskTarget.domainName.trim();
+    if (hostname && domainName && !hostname.includes(".")) {
+      return `${hostname}.${domainName}`;
+    }
+    return hostname || selectedTaskTarget.ip;
+  });
+  const taskKdcHostValue = $derived.by(() => {
+    if (taskForm.kdcHost.trim()) return taskForm.kdcHost.trim();
+    return selectedTaskKdcTarget?.ip || "";
+  });
   const filteredTaskCredentialOptions = $derived.by(() => {
     const search = taskCredentialSearch.trim().toLowerCase();
 
@@ -635,10 +660,10 @@
   const taskCredentialPreview = (credential: Credential | undefined, target: Target | undefined) => {
     if (!credential || !target) return "";
     const identity = credential.domain ? `${credential.domain}/${credential.username}` : credential.username;
-    const address = target.ip || target.hostname;
+    const address = credential.secretType.includes("aes") ? targetFqdn(target) : target.ip || target.hostname;
     if (credential.secretType === "password") return `${identity}:<redacted>@${address}`;
     if (credential.secretType === "ntlm" || credential.secretType === "kerberos-ntlm") return `-hashes :<redacted> ${identity}@${address}`;
-    if (credential.secretType.includes("aes")) return `-aesKey <redacted> ${identity}@${address}`;
+    if (credential.secretType.includes("aes")) return `-k -dc-ip ${taskKdcHostValue || "<kdc_ip>"} -aesKey <redacted> ${identity}@${address}`;
     return `${identity}@${address}`;
   };
 
@@ -1305,6 +1330,14 @@
       taskError = "Command is required.";
       return;
     }
+    if (taskNeedsKerberosOptions && !taskTargetFqdn) {
+      taskError = "Kerberos tasks require a target hostname and domain.";
+      return;
+    }
+    if (taskNeedsKerberosOptions && !taskKdcHostValue) {
+      taskError = "Select a KDC target or enter a KDC host for Kerberos tasks.";
+      return;
+    }
 
     taskRunning = true;
     try {
@@ -1317,7 +1350,8 @@
           method: taskForm.method,
           toolCommand: impacketToolName(taskForm.method),
           command: taskForm.command.trim(),
-          timeout: Number(taskForm.timeout) || 60
+          timeout: Number(taskForm.timeout) || 60,
+          kdcHost: taskKdcHostValue
         })
       });
 
@@ -1483,6 +1517,8 @@
     taskForm = {
       targetId: "",
       credentialId: "",
+      kdcTargetId: "",
+      kdcHost: "",
       method: "wmiexec",
       preset: "whoami",
       command: "whoami",
@@ -3326,6 +3362,34 @@
                   {/each}
                 </select>
               </label>
+
+              {#if taskNeedsKerberosOptions}
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="grid gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">KDC target</span>
+                    <select
+                      bind:value={taskForm.kdcTargetId}
+                      disabled={taskTargets.length === 0 || taskRunning}
+                      class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-lime-200/45 disabled:opacity-50"
+                    >
+                      <option class="bg-[#0d1316]" value="">Choose target</option>
+                      {#each taskTargets as target (target.id)}
+                        <option class="bg-[#0d1316]" value={String(target.id)}>{target.hostname || target.ip} / {target.ip}</option>
+                      {/each}
+                    </select>
+                  </label>
+
+                  <label class="grid gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">KDC host override</span>
+                    <input
+                      bind:value={taskForm.kdcHost}
+                      disabled={taskRunning}
+                      class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45 disabled:opacity-50"
+                      placeholder={selectedTaskKdcTarget?.ip || "10.10.10.5"}
+                    />
+                  </label>
+                </div>
+              {/if}
 
               <div class="grid gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Credential</span>

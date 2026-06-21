@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ type remoteTaskCommand struct {
 	Tool    string
 	Args    []string
 	Preview string
+	Env     []string
+	WorkDir string
+	Cleanup func()
+	Address string
 }
 
 func RunRemoteTask(teamName string, req RunRemoteTaskRequest) (*RemoteTaskRun, error) {
@@ -48,6 +53,10 @@ func RunRemoteTask(teamName string, req RunRemoteTaskRequest) (*RemoteTaskRun, e
 	if err != nil {
 		return nil, err
 	}
+	if command.Cleanup == nil {
+		command.Cleanup = func() {}
+	}
+	defer command.Cleanup()
 
 	timeout := time.Duration(req.Timeout) * time.Second
 	if timeout <= 0 {
@@ -62,6 +71,8 @@ func RunRemoteTask(teamName string, req RunRemoteTaskRequest) (*RemoteTaskRun, e
 
 	started := time.Now().UTC()
 	cmd := exec.CommandContext(ctx, command.Tool, command.Args...)
+	cmd.Dir = command.WorkDir
+	cmd.Env = append(os.Environ(), command.Env...)
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -82,7 +93,7 @@ func RunRemoteTask(teamName string, req RunRemoteTaskRequest) (*RemoteTaskRun, e
 		TeamName:       teamName,
 		TargetID:       target.ID,
 		TargetLabel:    targetLabel(*target),
-		TargetAddress:  targetAddress(*target),
+		TargetAddress:  command.Address,
 		CredentialID:   credential.ID,
 		CredentialName: credentialLabel(*credential),
 		Method:         req.Method,
@@ -114,9 +125,35 @@ func buildRemoteTaskCommand(target Target, credential Credential, req RunRemoteT
 	}
 	args := []string{}
 	previewArgs := []string{}
-	targetSpec, previewSpec, err := remoteTaskTargetSpec(credential, target)
+	targetSpec, previewSpec, targetAddress, err := remoteTaskTargetSpec(credential, target)
 	if err != nil {
 		return nil, err
+	}
+	env := []string{}
+	workDir := serverWorkingDir()
+	cleanup := func() {}
+
+	isKerberos := credential.SecretType == "kerberos-aes256" || credential.SecretType == "kerberos-aes"
+	if isKerberos {
+		if strings.TrimSpace(req.KDCHost) == "" {
+			return nil, errors.New("KDC host is required for Kerberos remote tasks")
+		}
+		args = append(args, "-k", "-dc-ip", strings.TrimSpace(req.KDCHost))
+		previewArgs = append(previewArgs, "-k", "-dc-ip", strings.TrimSpace(req.KDCHost))
+
+		if shouldUseNSSWrapperForKerberos() {
+			spec, err := buildNSSWrapperSpec(target.TeamName, env)
+			if err != nil {
+				return nil, err
+			}
+			env = spec.Env
+			workDir = spec.WorkDir
+			cleanup = spec.Cleanup
+			if err := validateKerberosTargetLookup(targetAddress, append(os.Environ(), env...)); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
 	}
 
 	switch credential.SecretType {
@@ -142,13 +179,17 @@ func buildRemoteTaskCommand(target Target, credential Credential, req RunRemoteT
 		Tool:    tool,
 		Args:    args,
 		Preview: tool + " " + strings.Join(previewArgs, " "),
+		Env:     env,
+		WorkDir: workDir,
+		Cleanup: cleanup,
+		Address: targetAddress,
 	}, nil
 }
 
-func remoteTaskTargetSpec(credential Credential, target Target) (string, string, error) {
+func remoteTaskTargetSpec(credential Credential, target Target) (string, string, string, error) {
 	user := strings.TrimSpace(credential.Username)
 	if user == "" {
-		return "", "", errors.New("credential username is required")
+		return "", "", "", errors.New("credential username is required")
 	}
 
 	identity := user
@@ -156,18 +197,19 @@ func remoteTaskTargetSpec(credential Credential, target Target) (string, string,
 		identity = domain + "/" + user
 	}
 
-	address := targetAddress(target)
+	address := targetAddressForCredential(target, credential)
 	if address == "" {
-		return "", "", errors.New("target address is required")
+		return "", "", "", errors.New("target address is required")
 	}
 
 	if credential.SecretType == "password" {
 		return fmt.Sprintf("%s:%s@%s", identity, credential.Secret, address),
 			fmt.Sprintf("%s:<redacted>@%s", identity, address),
+			address,
 			nil
 	}
 
-	return fmt.Sprintf("%s@%s", identity, address), fmt.Sprintf("%s@%s", identity, address), nil
+	return fmt.Sprintf("%s@%s", identity, address), fmt.Sprintf("%s@%s", identity, address), address, nil
 }
 
 func splitHashSecret(secret string) (string, string) {
@@ -183,6 +225,25 @@ func targetAddress(target Target) string {
 		return strings.TrimSpace(target.IP)
 	}
 	return strings.TrimSpace(target.Hostname)
+}
+
+func targetAddressForCredential(target Target, credential Credential) string {
+	if credential.SecretType == "kerberos-aes256" || credential.SecretType == "kerberos-aes" {
+		return targetFQDN(target)
+	}
+	return targetAddress(target)
+}
+
+func targetFQDN(target Target) string {
+	hostname := strings.TrimSpace(target.Hostname)
+	domainName := strings.TrimSpace(target.DomainName)
+	if hostname == "" {
+		return strings.TrimSpace(target.IP)
+	}
+	if domainName != "" && !strings.Contains(hostname, ".") {
+		return hostname + "." + domainName
+	}
+	return hostname
 }
 
 func targetLabel(target Target) string {

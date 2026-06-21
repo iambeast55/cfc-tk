@@ -86,6 +86,7 @@ type RunRemoteTaskRequest struct {
 	ToolCommand  string `json:"toolCommand"`
 	Command      string `json:"command"`
 	Timeout      int    `json:"timeout"`
+	KDCHost      string `json:"kdcHost"`
 }
 
 type AddTargetToTeam struct {
