@@ -191,3 +191,29 @@ func serverWorkingDir() string {
 	}
 	return filepath.Join(cwd, "server")
 }
+
+func validateKerberosTargetLookup(target string, env []string) error {
+	if strings.TrimSpace(target) == "" {
+		return errors.New("target is required")
+	}
+
+	getentPath, err := exec.LookPath("getent")
+	if err != nil {
+		return nil
+	}
+
+	cmd := exec.Command(getentPath, "ahosts", target)
+	cmd.Env = env
+	outputBytes, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(outputBytes))
+	if err != nil {
+		if output == "" {
+			output = err.Error()
+		}
+		return fmt.Errorf("Kerberos target lookup failed for %s under nss_wrapper: %s", target, output)
+	}
+	if output == "" {
+		return fmt.Errorf("Kerberos target lookup returned no addresses for %s under nss_wrapper", target)
+	}
+	return nil
+}

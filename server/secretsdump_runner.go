@@ -47,6 +47,10 @@ func RunSecretsdump(teamName string, req RunSecretsdumpRequest) (*RunSecretsdump
 		commandEnv = spec.Env
 		commandDir = spec.WorkDir
 		cleanup = spec.Cleanup
+		if err := validateKerberosTargetLookup(req.Target, commandEnv); err != nil {
+			cleanup()
+			return nil, err
+		}
 	}
 	defer cleanup()
 

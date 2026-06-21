@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -47,6 +48,10 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 		shellEnv = spec.Env
 		shellWorkDir = spec.WorkDir
 		cleanup = spec.Cleanup
+		if err := validateKerberosTargetLookup(req.Target, append(os.Environ(), shellEnv...)); err != nil {
+			cleanup()
+			return nil, err
+		}
 	}
 	shellCommand := terminalShellCommand(title, shellEnv, fullCommand, shellWorkDir)
 
