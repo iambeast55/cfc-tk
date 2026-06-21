@@ -36,16 +36,30 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 
 	title := terminalTitle(teamName, req.TargetLabel, req.Target)
 	fullCommand := append(commandParts, args...)
-	shellCommand := terminalShellCommand(title, env, fullCommand)
+	shellEnv := env
+	shellWorkDir := serverWorkingDir()
+	cleanup := func() {}
+	if req.AuthMode == "kerberos" && shouldUseNSSWrapperForKerberos() {
+		spec, err := buildNSSWrapperSpec(teamName, env)
+		if err != nil {
+			return nil, err
+		}
+		shellEnv = spec.Env
+		shellWorkDir = spec.WorkDir
+		cleanup = spec.Cleanup
+	}
+	shellCommand := terminalShellCommand(title, shellEnv, fullCommand, shellWorkDir)
 
 	terminal, terminalArgs, err := terminalLaunchCommand(title, shellCommand)
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
 
 	cmd := exec.Command(terminal, terminalArgs...)
-	cmd.Dir = serverWorkingDir()
+	cmd.Dir = shellWorkDir
 	if err := cmd.Start(); err != nil {
+		cleanup()
 		return nil, fmt.Errorf("failed to launch terminal: %w", err)
 	}
 
@@ -122,8 +136,11 @@ func terminalTitle(teamName string, targetLabel string, target string) string {
 	return teamName + ":" + box
 }
 
-func terminalShellCommand(title string, env []string, command []string) string {
+func terminalShellCommand(title string, env []string, command []string, workDir string) string {
 	lines := []string{"printf '\\033]0;%s\\007' " + shQuote(title)}
+	if workDir != "" {
+		lines = append(lines, "cd "+shQuote(workDir))
+	}
 	for _, item := range env {
 		name, value, ok := strings.Cut(item, "=")
 		if !ok || name == "" {
@@ -140,6 +157,7 @@ func terminalShellCommand(title string, env []string, command []string) string {
 	lines = append(lines, "status=$?")
 	lines = append(lines, "echo")
 	lines = append(lines, "printf "+shQuote(fmt.Sprintf("cfc-tk: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
+	lines = append(lines, "rm -f \"$NSS_WRAPPER_HOSTS\" >/dev/null 2>&1 || true")
 	lines = append(lines, "read -r -p 'Press Enter to close this terminal...' _")
 	lines = append(lines, "exit \"$status\"")
 	return strings.Join(lines, "; ")

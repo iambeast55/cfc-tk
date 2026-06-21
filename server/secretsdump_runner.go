@@ -35,9 +35,24 @@ func RunSecretsdump(teamName string, req RunSecretsdumpRequest) (*RunSecretsdump
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, commandParts[0], append(commandParts[1:], args...)...)
-	cmd.Dir = serverWorkingDir()
-	cmd.Env = append(os.Environ(), env...)
+	command := append(commandParts, args...)
+	commandEnv := append(os.Environ(), env...)
+	commandDir := serverWorkingDir()
+	cleanup := func() {}
+	if req.AuthMode == "kerberos" && shouldUseNSSWrapperForKerberos() {
+		spec, err := buildNSSWrapperSpec(teamName, commandEnv)
+		if err != nil {
+			return nil, err
+		}
+		commandEnv = spec.Env
+		commandDir = spec.WorkDir
+		cleanup = spec.Cleanup
+	}
+	defer cleanup()
+
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = commandDir
+	cmd.Env = commandEnv
 
 	outputBytes, runErr := cmd.CombinedOutput()
 	output := string(outputBytes)
@@ -59,7 +74,7 @@ func RunSecretsdump(teamName string, req RunSecretsdumpRequest) (*RunSecretsdump
 	}
 
 	return &RunSecretsdumpResponse{
-		Command:     append(commandParts, args...),
+		Command:     command,
 		Output:      output,
 		Credentials: created,
 	}, nil
@@ -252,17 +267,6 @@ func addCredentialOnce(seen map[string]bool, req CreateCredentialRequest) bool {
 	}
 	seen[key] = true
 	return true
-}
-
-func serverWorkingDir() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	if filepath.Base(cwd) == "server" {
-		return cwd
-	}
-	return filepath.Join(cwd, "server")
 }
 
 func resolveLocalPath(path string) string {
