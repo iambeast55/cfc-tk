@@ -37,8 +37,29 @@ func RunKerberosTicket(teamName string, req RunKerberosTicketRequest) (*RunKerbe
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
+	commandEnv := os.Environ()
+	commandDir := artifactDir
+	cleanup := func() {}
+	if shouldUseNSSWrapperForKerberos() {
+		spec, err := buildNSSWrapperSpec(teamName, nil)
+		if err != nil {
+			return nil, err
+		}
+		commandEnv = append(os.Environ(), spec.Env...)
+		commandDir = artifactDir
+		cleanup = spec.Cleanup
+		if req.KDCHost != "" && !looksLikeIPAddress(req.KDCHost) {
+			if err := validateKerberosTargetLookup(req.KDCHost, commandEnv); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
+	}
+	defer cleanup()
+
 	cmd := exec.CommandContext(ctx, commandParts[0], append(commandParts[1:], args...)...)
-	cmd.Dir = artifactDir
+	cmd.Dir = commandDir
+	cmd.Env = commandEnv
 	outputBytes, runErr := cmd.CombinedOutput()
 	output := string(outputBytes)
 	if ctx.Err() == context.DeadlineExceeded {
