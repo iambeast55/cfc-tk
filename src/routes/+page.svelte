@@ -191,6 +191,7 @@
     ntHash: string;
     aesKey: string;
     krbtgtAesKey: string;
+    kdcTargetId: string;
     kdcHost: string;
     useKerberosCache: boolean;
     cachePath: string;
@@ -343,6 +344,7 @@
     ntHash: "",
     aesKey: "",
     krbtgtAesKey: "",
+    kdcTargetId: "",
     kdcHost: "",
     useKerberosCache: true,
     cachePath: "",
@@ -467,6 +469,9 @@
   const selectedCommandTarget = $derived(
     commandTargets.find((target) => String(target.id) === commandForm.targetId)
   );
+  const selectedCommandKdcTarget = $derived(
+    commandTargets.find((target) => String(target.id) === commandForm.kdcTargetId)
+  );
   const selectedKerberosTargetName = $derived.by(() => {
     if (!selectedCommandTarget?.hostname) return selectedCommandTarget?.ip || "";
     const hostname = selectedCommandTarget.hostname.trim();
@@ -492,6 +497,10 @@
       return selectedKerberosTargetName;
     }
     return selectedCommandTarget?.ip || selectedCommandTarget?.hostname || "";
+  });
+  const commandKdcHostValue = $derived.by(() => {
+    if (commandForm.kdcHost.trim()) return commandForm.kdcHost.trim();
+    return selectedCommandKdcTarget?.ip || "";
   });
 
   const credentialIdentity = (credential: Credential) =>
@@ -824,8 +833,8 @@
       if (!domain) return "Enter a domain.";
 
       const args = [impacketToolName("getTGT")];
-      if (commandForm.kdcHost.trim()) {
-        args.push("-dc-ip", shellQuote(commandForm.kdcHost.trim()));
+      if (commandKdcHostValue) {
+        args.push("-dc-ip", shellQuote(commandKdcHostValue));
       }
       if (commandForm.ticketAuthMode === "password") {
         const password = commandForm.password ? commandForm.password : "<password>";
@@ -883,8 +892,8 @@
       args.push("-use-vss");
     }
 
-    if (commandForm.kdcHost.trim()) {
-      args.push("-dc-ip", shellQuote(commandForm.kdcHost.trim()));
+    if (commandKdcHostValue) {
+      args.push("-dc-ip", shellQuote(commandKdcHostValue));
     }
 
     if (commandForm.authMode === "password") {
@@ -1377,7 +1386,7 @@
       if (domains.length > 0) domains = [];
       if (targets.length > 0) targets = [];
       if (commandForm.teamName || commandForm.targetId) {
-        patchCommandForm({ teamName: "", targetId: "" });
+        patchCommandForm({ teamName: "", targetId: "", kdcTargetId: "" });
       }
       if (commandTargets.length > 0) commandTargets = [];
       if (kerberosCaches.length > 0) kerberosCaches = [];
@@ -1411,7 +1420,7 @@
     }
 
     if (!commandForm.teamName || !teams.some((team) => team.name === commandForm.teamName)) {
-      patchCommandForm({ teamName: teams[0].name, targetId: "" });
+      patchCommandForm({ teamName: teams[0].name, targetId: "", kdcTargetId: "" });
     }
 
     if (!easyMode.teamName || !teams.some((team) => team.name === easyMode.teamName)) {
@@ -1459,8 +1468,8 @@
     void loadCommandTargets(teamName);
     void loadKerberosCaches(teamName);
     void loadCommandCredentials(teamName);
-    if (commandForm.targetId || commandForm.manualTarget) {
-      patchCommandForm({ targetId: "", manualTarget: "" });
+    if (commandForm.targetId || commandForm.manualTarget || commandForm.kdcTargetId || commandForm.kdcHost) {
+      patchCommandForm({ targetId: "", manualTarget: "", kdcTargetId: "", kdcHost: "" });
     }
   });
 
@@ -1966,7 +1975,7 @@
       username: commandForm.username.trim(),
       method: commandForm.commandKind,
       cachePath: kerberosCachePath,
-      kdcHost: commandForm.kdcHost.trim(),
+      kdcHost: commandKdcHostValue,
       domainSid: commandForm.domainSid.trim(),
       userId: commandForm.userId.trim(),
       groups: commandForm.groups.trim(),
@@ -2038,7 +2047,7 @@
             ntHash: commandForm.ntHash.trim(),
             aesKey: commandForm.aesKey.trim(),
             krbtgtAesKey: commandForm.krbtgtAesKey.trim(),
-            kdcHost: commandForm.kdcHost.trim(),
+            kdcHost: commandKdcHostValue,
             domainSid: commandForm.domainSid.trim(),
             userId: commandForm.userId.trim(),
             groups: commandForm.groups.trim(),
@@ -2102,7 +2111,7 @@
             lmHash: commandForm.lmHash.trim(),
             ntHash: commandForm.ntHash.trim(),
             aesKey: commandForm.aesKey.trim(),
-            kdcHost: commandForm.kdcHost.trim(),
+            kdcHost: commandKdcHostValue,
             useKerberosCache: commandForm.useKerberosCache,
             cachePath: kerberosCachePath,
             justDc: commandForm.justDc,
@@ -2174,7 +2183,7 @@
             lmHash: commandForm.lmHash.trim(),
             ntHash: commandForm.ntHash.trim(),
             aesKey: commandForm.aesKey.trim(),
-            kdcHost: commandForm.kdcHost.trim(),
+            kdcHost: commandKdcHostValue,
             useKerberosCache: commandForm.useKerberosCache,
             cachePath: kerberosCachePath
           })
@@ -3194,14 +3203,30 @@
                 </label>
               {/if}
 
-              <label class="grid gap-2">
-                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">DC IP / KDC host</span>
-                <input
-                  bind:value={commandForm.kdcHost}
-                  class="rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
-                  placeholder="optional, useful for domain/Kerberos"
-                />
-              </label>
+              <div class="grid min-w-0 gap-3 2xl:grid-cols-2">
+                <label class="grid min-w-0 gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">KDC target</span>
+                  <select
+                    bind:value={commandForm.kdcTargetId}
+                    class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-teal-200/45"
+                  >
+                    <option class="bg-[#0d1316]" value="">None</option>
+                    {#each commandTargets.filter((target) => target.os === "windows") as target}
+                      <option class="bg-[#0d1316]" value={String(target.id)}>
+                        {(target.hostname || target.ip) + (target.ip ? ` (${target.ip})` : "")}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="grid min-w-0 gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">DC IP / KDC host override</span>
+                  <input
+                    bind:value={commandForm.kdcHost}
+                    class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                    placeholder={selectedCommandKdcTarget?.ip || "optional, useful for domain/Kerberos"}
+                  />
+                </label>
+              </div>
             </div>
           </div>
 
