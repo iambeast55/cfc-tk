@@ -30,6 +30,12 @@ type nssWrapperSpec struct {
 	LibraryPath string
 }
 
+type impacketExecutionSpec struct {
+	Env     []string
+	WorkDir string
+	Cleanup func()
+}
+
 func shouldUseNSSWrapperForKerberos() bool {
 	return runtime.GOOS == "linux"
 }
@@ -216,4 +222,40 @@ func validateKerberosTargetLookup(target string, env []string) error {
 		return fmt.Errorf("Kerberos target lookup returned no addresses for %s under nss_wrapper", target)
 	}
 	return nil
+}
+
+func prepareImpacketExecution(teamName string, baseEnv []string, workDir string, lookupTarget string) (*impacketExecutionSpec, error) {
+	env := append([]string{}, baseEnv...)
+	if workDir == "" {
+		workDir = serverWorkingDir()
+	}
+
+	spec := &impacketExecutionSpec{
+		Env:     env,
+		WorkDir: workDir,
+		Cleanup: func() {},
+	}
+
+	if !shouldUseNSSWrapperForKerberos() {
+		return spec, nil
+	}
+
+	nssSpec, err := buildNSSWrapperSpec(teamName, env)
+	if err != nil {
+		return nil, err
+	}
+
+	spec.Env = nssSpec.Env
+	spec.WorkDir = workDir
+	spec.Cleanup = nssSpec.Cleanup
+
+	lookupTarget = strings.TrimSpace(lookupTarget)
+	if lookupTarget != "" && !looksLikeIPAddress(lookupTarget) {
+		if err := validateKerberosTargetLookup(lookupTarget, spec.Env); err != nil {
+			spec.Cleanup()
+			return nil, err
+		}
+	}
+
+	return spec, nil
 }

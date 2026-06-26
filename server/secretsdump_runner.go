@@ -36,27 +36,15 @@ func RunSecretsdump(teamName string, req RunSecretsdumpRequest) (*RunSecretsdump
 	defer cancel()
 
 	command := append(commandParts, args...)
-	commandEnv := append(os.Environ(), env...)
-	commandDir := serverWorkingDir()
-	cleanup := func() {}
-	if req.AuthMode == "kerberos" && shouldUseNSSWrapperForKerberos() {
-		spec, err := buildNSSWrapperSpec(teamName, commandEnv)
-		if err != nil {
-			return nil, err
-		}
-		commandEnv = spec.Env
-		commandDir = spec.WorkDir
-		cleanup = spec.Cleanup
-		if err := validateKerberosTargetLookup(req.Target, commandEnv); err != nil {
-			cleanup()
-			return nil, err
-		}
+	execSpec, err := prepareImpacketExecution(teamName, append(os.Environ(), env...), serverWorkingDir(), req.Target)
+	if err != nil {
+		return nil, err
 	}
-	defer cleanup()
+	defer execSpec.Cleanup()
 
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.Dir = commandDir
-	cmd.Env = commandEnv
+	cmd.Dir = execSpec.WorkDir
+	cmd.Env = execSpec.Env
 
 	outputBytes, runErr := cmd.CombinedOutput()
 	output := string(outputBytes)

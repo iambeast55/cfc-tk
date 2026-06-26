@@ -141,20 +141,15 @@ func buildRemoteTaskCommand(target Target, credential Credential, req RunRemoteT
 		args = append(args, "-k", "-dc-ip", strings.TrimSpace(req.KDCHost))
 		previewArgs = append(previewArgs, "-k", "-dc-ip", strings.TrimSpace(req.KDCHost))
 
-		if shouldUseNSSWrapperForKerberos() {
-			spec, err := buildNSSWrapperSpec(target.TeamName, env)
-			if err != nil {
-				return nil, err
-			}
-			env = spec.Env
-			workDir = spec.WorkDir
-			cleanup = spec.Cleanup
-			if err := validateKerberosTargetLookup(targetAddress, append(os.Environ(), env...)); err != nil {
-				cleanup()
-				return nil, err
-			}
-		}
 	}
+
+	execSpec, err := prepareImpacketExecution(target.TeamName, env, workDir, targetAddress)
+	if err != nil {
+		return nil, err
+	}
+	env = execSpec.Env
+	workDir = execSpec.WorkDir
+	cleanup = execSpec.Cleanup
 
 	switch credential.SecretType {
 	case "password":

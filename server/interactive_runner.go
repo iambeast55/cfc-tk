@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -37,34 +36,22 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 
 	title := terminalTitle(teamName, req.TargetLabel, req.Target)
 	fullCommand := append(commandParts, args...)
-	shellEnv := env
-	shellWorkDir := serverWorkingDir()
-	cleanup := func() {}
-	if req.AuthMode == "kerberos" && shouldUseNSSWrapperForKerberos() {
-		spec, err := buildNSSWrapperSpec(teamName, env)
-		if err != nil {
-			return nil, err
-		}
-		shellEnv = spec.Env
-		shellWorkDir = spec.WorkDir
-		cleanup = spec.Cleanup
-		if err := validateKerberosTargetLookup(req.Target, append(os.Environ(), shellEnv...)); err != nil {
-			cleanup()
-			return nil, err
-		}
+	execSpec, err := prepareImpacketExecution(teamName, env, serverWorkingDir(), req.Target)
+	if err != nil {
+		return nil, err
 	}
-	shellCommand := terminalShellCommand(title, shellEnv, fullCommand, shellWorkDir)
+	shellCommand := terminalShellCommand(title, execSpec.Env, fullCommand, execSpec.WorkDir)
 
 	terminal, terminalArgs, err := terminalLaunchCommand(title, shellCommand)
 	if err != nil {
-		cleanup()
+		execSpec.Cleanup()
 		return nil, err
 	}
 
 	cmd := exec.Command(terminal, terminalArgs...)
-	cmd.Dir = shellWorkDir
+	cmd.Dir = execSpec.WorkDir
 	if err := cmd.Start(); err != nil {
-		cleanup()
+		execSpec.Cleanup()
 		return nil, fmt.Errorf("failed to launch terminal: %w", err)
 	}
 
