@@ -133,16 +133,19 @@ func terminalShellCommand(title string, env []string, command []string, workDir 
 	if workDir != "" {
 		lines = append(lines, "cd "+shQuote(workDir))
 	}
+
+	invocation := []string{"env"}
 	for _, item := range env {
 		name, value, ok := strings.Cut(item, "=")
 		if !ok || name == "" {
 			continue
 		}
-		lines = append(lines, "export "+name+"="+shQuote(value))
+		invocation = append(invocation, name+"="+value)
 	}
+	invocation = append(invocation, command...)
 
-	quoted := make([]string, 0, len(command))
-	for _, part := range command {
+	quoted := make([]string, 0, len(invocation))
+	for _, part := range invocation {
 		quoted = append(quoted, shQuote(part))
 	}
 	lines = append(lines, strings.Join(quoted, " "))
@@ -158,22 +161,22 @@ func terminalShellCommand(title string, env []string, command []string, workDir 
 func terminalLaunchCommand(title string, shellCommand string) (string, []string, error) {
 	terminals := []terminalSpec{
 		{"gnome-terminal", func(title string, shellCommand string) []string {
-			return []string{"--title", title, "--", "bash", "-lc", shellCommand}
+			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", "-c", shellCommand}
 		}},
 		{"xfce4-terminal", func(title string, shellCommand string) []string {
-			return []string{"--title", title, "--command", "bash -lc " + shQuote(shellCommand)}
+			return []string{"--title", title, "--command", "bash --noprofile --norc -c " + shQuote(shellCommand)}
 		}},
 		{"mate-terminal", func(title string, shellCommand string) []string {
-			return []string{"--title", title, "--", "bash", "-lc", shellCommand}
+			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", "-c", shellCommand}
 		}},
 		{"konsole", func(title string, shellCommand string) []string {
-			return []string{"--new-tab", "-p", "tabtitle=" + title, "-e", "bash", "-lc", shellCommand}
+			return []string{"--new-tab", "-p", "tabtitle=" + title, "-e", "bash", "--noprofile", "--norc", "-c", shellCommand}
 		}},
 		{"x-terminal-emulator", func(title string, shellCommand string) []string {
-			return []string{"-T", title, "-e", "bash", "-lc", shellCommand}
+			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", "-c", shellCommand}
 		}},
 		{"xterm", func(title string, shellCommand string) []string {
-			return []string{"-T", title, "-e", "bash", "-lc", shellCommand}
+			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", "-c", shellCommand}
 		}},
 	}
 
