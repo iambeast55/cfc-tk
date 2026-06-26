@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -40,10 +41,15 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 	if err != nil {
 		return nil, err
 	}
-	shellCommand := terminalShellCommand(title, execSpec.Env, fullCommand, execSpec.WorkDir)
-
-	terminal, terminalArgs, err := terminalLaunchCommand(title, shellCommand)
+	launcherPath, err := writeTerminalLauncherScript(title, execSpec.Env, fullCommand, execSpec.WorkDir)
 	if err != nil {
+		execSpec.Cleanup()
+		return nil, err
+	}
+
+	terminal, terminalArgs, err := terminalLaunchCommand(title, launcherPath)
+	if err != nil {
+		_ = os.Remove(launcherPath)
 		execSpec.Cleanup()
 		return nil, err
 	}
@@ -128,7 +134,7 @@ func terminalTitle(teamName string, targetLabel string, target string) string {
 	return teamName + ":" + box
 }
 
-func terminalShellCommand(title string, env []string, command []string, workDir string) string {
+func terminalShellCommand(title string, env []string, command []string, workDir string, launcherPath string) string {
 	lines := []string{"printf '\\033]0;%s\\007' " + shQuote(title)}
 	if workDir != "" {
 		lines = append(lines, "cd "+shQuote(workDir))
@@ -144,46 +150,86 @@ func terminalShellCommand(title string, env []string, command []string, workDir 
 	}
 	invocation = append(invocation, command...)
 
+	cleanupTargets := []string{launcherPath}
+	if hostsPath := envValue(env, "NSS_WRAPPER_HOSTS"); hostsPath != "" {
+		cleanupTargets = append(cleanupTargets, hostsPath)
+	}
+	cleanupArgs := make([]string, 0, len(cleanupTargets)+3)
+	cleanupArgs = append(cleanupArgs, "rm", "-f", "--")
+	for _, target := range cleanupTargets {
+		if strings.TrimSpace(target) == "" {
+			continue
+		}
+		cleanupArgs = append(cleanupArgs, target)
+	}
+
 	quoted := make([]string, 0, len(invocation))
 	for _, part := range invocation {
 		quoted = append(quoted, shQuote(part))
 	}
+	quotedCleanup := make([]string, 0, len(cleanupArgs))
+	for _, part := range cleanupArgs {
+		quotedCleanup = append(quotedCleanup, shQuote(part))
+	}
+	lines = append(lines, "trap "+shQuote(strings.Join(quotedCleanup, " ")+" >/dev/null 2>&1 || true")+" EXIT")
 	lines = append(lines, strings.Join(quoted, " "))
 	lines = append(lines, "status=$?")
 	lines = append(lines, "echo")
 	lines = append(lines, "printf "+shQuote(fmt.Sprintf("cfc-tk: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
-	lines = append(lines, "rm -f \"$NSS_WRAPPER_HOSTS\" >/dev/null 2>&1 || true")
 	lines = append(lines, "read -r -p 'Press Enter to close this terminal...' _")
 	lines = append(lines, "exit \"$status\"")
 	return strings.Join(lines, "; ")
 }
 
-func terminalLaunchCommand(title string, shellCommand string) (string, []string, error) {
+func writeTerminalLauncherScript(title string, env []string, command []string, workDir string) (string, error) {
+	file, err := os.CreateTemp("", "cfc-tk-launcher-*.sh")
+	if err != nil {
+		return "", fmt.Errorf("failed to create terminal launcher: %w", err)
+	}
+	launcherPath := file.Name()
+	script := "#!/usr/bin/env bash\n" + terminalShellCommand(title, env, command, workDir, launcherPath) + "\n"
+	if _, err := file.WriteString(script); err != nil {
+		file.Close()
+		_ = os.Remove(launcherPath)
+		return "", fmt.Errorf("failed to write terminal launcher: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(launcherPath)
+		return "", fmt.Errorf("failed to finalize terminal launcher: %w", err)
+	}
+	if err := os.Chmod(launcherPath, 0o700); err != nil {
+		_ = os.Remove(launcherPath)
+		return "", fmt.Errorf("failed to mark terminal launcher executable: %w", err)
+	}
+	return launcherPath, nil
+}
+
+func terminalLaunchCommand(title string, launcherPath string) (string, []string, error) {
 	terminals := []terminalSpec{
-		{"gnome-terminal", func(title string, shellCommand string) []string {
-			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", "-c", shellCommand}
+		{"gnome-terminal", func(title string, launcherPath string) []string {
+			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", launcherPath}
 		}},
-		{"xfce4-terminal", func(title string, shellCommand string) []string {
-			return []string{"--title", title, "--command", "bash --noprofile --norc -c " + shQuote(shellCommand)}
+		{"xfce4-terminal", func(title string, launcherPath string) []string {
+			return []string{"--title", title, "--command", "bash --noprofile --norc " + shQuote(launcherPath)}
 		}},
-		{"mate-terminal", func(title string, shellCommand string) []string {
-			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", "-c", shellCommand}
+		{"mate-terminal", func(title string, launcherPath string) []string {
+			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", launcherPath}
 		}},
-		{"konsole", func(title string, shellCommand string) []string {
-			return []string{"--new-tab", "-p", "tabtitle=" + title, "-e", "bash", "--noprofile", "--norc", "-c", shellCommand}
+		{"konsole", func(title string, launcherPath string) []string {
+			return []string{"--new-tab", "-p", "tabtitle=" + title, "-e", "bash", "--noprofile", "--norc", launcherPath}
 		}},
-		{"x-terminal-emulator", func(title string, shellCommand string) []string {
-			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", "-c", shellCommand}
+		{"x-terminal-emulator", func(title string, launcherPath string) []string {
+			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", launcherPath}
 		}},
-		{"xterm", func(title string, shellCommand string) []string {
-			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", "-c", shellCommand}
+		{"xterm", func(title string, launcherPath string) []string {
+			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", launcherPath}
 		}},
 	}
 
 	for _, terminal := range terminals {
 		path, err := exec.LookPath(terminal.name)
 		if err == nil {
-			return path, terminal.args(title, shellCommand), nil
+			return path, terminal.args(title, launcherPath), nil
 		}
 	}
 
@@ -195,6 +241,16 @@ func shQuote(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func envValue(env []string, key string) string {
+	for _, item := range env {
+		name, value, ok := strings.Cut(item, "=")
+		if ok && name == key {
+			return value
+		}
+	}
+	return ""
 }
 
 func isInteractiveCommandKind(value string) bool {
