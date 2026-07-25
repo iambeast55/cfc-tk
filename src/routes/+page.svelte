@@ -216,7 +216,7 @@
   const BACKEND_URL = "http://localhost:8765";
   const IMPACKET_STYLE_KEY = "cfc-impui.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-impui.impacketCustomTools";
-  const CREDENTIALS_PAGE_SIZE = 12;
+  const CREDENTIALS_PAGE_SIZE = 8;
   const credentialScopeFilters = ["users", "all", "domain", "local", "machines"] as const;
   const credentialTypeFilters = ["all", "ntlm", "password", "aes"] as const;
 
@@ -608,6 +608,7 @@
     const start = (normalizedCredentialsPage - 1) * CREDENTIALS_PAGE_SIZE;
     return filteredCredentials.slice(start, start + CREDENTIALS_PAGE_SIZE);
   });
+  const recentTaskRuns = $derived.by(() => taskRuns.slice(0, 3));
   const targetFqdn = (target: Target | undefined) => {
     if (!target) return "";
     const hostname = target.hostname.trim();
@@ -3531,7 +3532,7 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Task runner</p>
                 <h2 class="mt-2 text-xl font-semibold text-white">{selectedTaskTeam || "No team selected"}</h2>
-                <p class="mt-1 text-sm text-white/50">{taskRuns.length} recent runs</p>
+                <p class="mt-1 text-sm text-white/50">{recentTaskRuns.length} recent runs</p>
               </div>
               <Button
                 type="button"
@@ -3569,11 +3570,11 @@
 
             <div class="mt-5 border-t border-white/10 pt-4">
               <p class="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Run history</p>
-              {#if taskRuns.length === 0}
+              {#if recentTaskRuns.length === 0}
                 <p class="mt-3 rounded-md border border-white/10 bg-black/20 px-3 py-4 text-sm text-white/45">No remote task runs yet.</p>
               {:else}
                 <div class="mt-3 grid gap-3">
-                  {#each taskRuns as run (run.id)}
+                  {#each recentTaskRuns as run (run.id)}
                     <div class="rounded-md border border-white/10 bg-black/20 p-3">
                       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
