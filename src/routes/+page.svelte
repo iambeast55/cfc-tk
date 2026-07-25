@@ -2345,7 +2345,7 @@
 <div class="min-h-screen bg-[#070b0d] text-[#e6edf0]">
 
   <div class="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-    <header class="flex flex-col gap-5 border-b border-white/10 pb-5 md:flex-row md:items-center md:justify-between">
+    <header class="flex flex-col gap-4 border-b border-white/10 pb-4 md:flex-row md:items-center md:justify-between">
       <div class="flex items-center gap-4">
         <div class="flex h-12 w-12 items-center justify-center rounded-md border border-teal-300/25 bg-white/[0.04]">
           <img src={logo} alt="CFC-ImpUI" class="h-10 w-10 object-contain" />
@@ -2372,7 +2372,7 @@
       </div>
     </header>
 
-    <nav class="mt-6 flex flex-wrap gap-2 border-b border-white/10 pb-3" aria-label="Workspace tabs">
+    <nav class="mt-4 flex flex-wrap gap-2 border-b border-white/10 pb-3" aria-label="Workspace tabs">
       {#each tabs as tab}
         <button
           type="button"
@@ -2392,7 +2392,7 @@
       {/each}
     </nav>
 
-    <main class="grid flex-1 gap-5 py-6">
+    <main class="grid flex-1 gap-4 py-4">
       {#if activeTab === "main"}
         <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
           <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
@@ -2812,15 +2812,12 @@
           </div>
         </section>
       {:else if activeTab === "command"}
-        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
-          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
+        <section class="grid min-w-0 gap-4 xl:max-h-[calc(100vh-14rem)] xl:grid-cols-[minmax(0,440px)_minmax(0,1fr)] xl:items-start">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-4 xl:min-h-0 xl:overflow-y-auto">
             <Radar class="h-6 w-6 text-teal-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Command</h2>
-            <p class="mt-2 text-sm leading-6 text-white/60">
-              Build common Impacket commands from known teams, targets, tickets, and credentials.
-            </p>
 
-            <div class="mt-6 grid gap-3">
+            <div class="mt-4 grid gap-3">
               <label class="grid gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
                 <select
@@ -3219,7 +3216,7 @@
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Notes</span>
                   <textarea
                     bind:value={commandForm.notes}
-                    class="min-h-20 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                    class="min-h-16 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
                     placeholder="optional"
                   ></textarea>
                 </label>
@@ -3227,7 +3224,7 @@
             </div>
           </div>
 
-          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-4 xl:min-h-0 xl:overflow-y-auto">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Preview</p>
@@ -3266,7 +3263,7 @@
               <p class="mt-5 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">{commandError}</p>
             {/if}
 
-            <pre class="mt-5 min-h-40 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-4 font-mono text-sm leading-6 text-teal-100">{commandPreview}</pre>
+            <pre class="mt-4 min-h-28 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-3 font-mono text-sm leading-5 text-teal-100">{commandPreview}</pre>
 
             {#if commandRunOutput}
               <div class="mt-4">
@@ -3309,7 +3306,7 @@
               {/if}
             </div>
 
-            <div class="mt-6 border-t border-white/10 pt-5">
+            <div class="mt-5 border-t border-white/10 pt-4">
               <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Saved caches</p>
@@ -3349,15 +3346,12 @@
           </div>
         </section>
       {:else if activeTab === "tasks"}
-        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
+        <section class="grid min-w-0 gap-4 xl:max-h-[calc(100vh-14rem)] xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)] xl:items-start">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-4 xl:min-h-0 xl:overflow-y-auto">
             <Terminal class="h-6 w-6 text-lime-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Remote Tasks</h2>
-            <p class="mt-2 text-sm leading-6 text-white/60">
-              Run explicit, single-target Impacket tasks and capture output.
-            </p>
 
-            <div class="mt-6 grid min-w-0 gap-3">
+            <div class="mt-4 grid min-w-0 gap-3">
               <label class="grid gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
                 <select
@@ -3514,7 +3508,7 @@
                 <textarea
                   bind:value={taskForm.command}
                   disabled={taskRunning}
-                  class="min-h-24 rounded-md border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45 disabled:opacity-50"
+                  class="min-h-20 rounded-md border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white outline-none transition placeholder:text-white/30 focus:border-lime-200/45 disabled:opacity-50"
                   placeholder="whoami"
                   oninput={() => (taskForm = { ...taskForm, preset: "custom" })}
                 ></textarea>
@@ -3532,12 +3526,12 @@
             </div>
           </div>
 
-          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-4 xl:min-h-0 xl:overflow-y-auto">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.22em] text-lime-200/60">Task runner</p>
                 <h2 class="mt-2 text-xl font-semibold text-white">{selectedTaskTeam || "No team selected"}</h2>
-                <p class="mt-2 text-sm text-white/50">{taskRuns.length} recent runs</p>
+                <p class="mt-1 text-sm text-white/50">{taskRuns.length} recent runs</p>
               </div>
               <Button
                 type="button"
@@ -3561,9 +3555,9 @@
               <p class="mt-5 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">Add password, NTLM, or AES256 credentials before running remote tasks.</p>
             {/if}
 
-            <div class="mt-5">
+            <div class="mt-4">
               <p class="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Preview</p>
-              <pre class="mt-2 min-h-20 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-4 font-mono text-sm leading-6 text-teal-100">{taskCommandPreview || "Select target, credential, and command."}</pre>
+              <pre class="mt-2 min-h-16 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-3 font-mono text-sm leading-5 text-teal-100">{taskCommandPreview || "Select target, credential, and command."}</pre>
             </div>
 
             {#if taskOutput}
@@ -3573,7 +3567,7 @@
               </div>
             {/if}
 
-            <div class="mt-6 border-t border-white/10 pt-5">
+            <div class="mt-5 border-t border-white/10 pt-4">
               <p class="text-xs font-semibold uppercase tracking-[0.22em] text-white/45">Run history</p>
               {#if taskRuns.length === 0}
                 <p class="mt-3 rounded-md border border-white/10 bg-black/20 px-3 py-4 text-sm text-white/45">No remote task runs yet.</p>
