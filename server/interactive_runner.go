@@ -175,14 +175,14 @@ func terminalShellCommand(title string, env []string, command []string, workDir 
 	lines = append(lines, strings.Join(quoted, " "))
 	lines = append(lines, "status=$?")
 	lines = append(lines, "echo")
-	lines = append(lines, "printf "+shQuote(fmt.Sprintf("cfc-tk: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
+	lines = append(lines, "printf "+shQuote(fmt.Sprintf("cfc-impui: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
 	lines = append(lines, "read -r -p 'Press Enter to close this terminal...' _")
 	lines = append(lines, "exit \"$status\"")
 	return strings.Join(lines, "; ")
 }
 
 func writeTerminalLauncherScript(title string, env []string, command []string, workDir string) (string, error) {
-	file, err := os.CreateTemp("", "cfc-tk-launcher-*.sh")
+	file, err := os.CreateTemp("", "cfc-impui-launcher-*.sh")
 	if err != nil {
 		return "", fmt.Errorf("failed to create terminal launcher: %w", err)
 	}

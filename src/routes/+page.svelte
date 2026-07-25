@@ -214,8 +214,8 @@
   type TabId = "main" | "easy" | "command" | "tasks" | "notes" | "network" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "psexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8080";
-  const IMPACKET_STYLE_KEY = "cfc-tk.impacketCommandStyle";
-  const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-tk.impacketCustomTools";
+  const IMPACKET_STYLE_KEY = "cfc-impui.impacketCommandStyle";
+  const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-impui.impacketCustomTools";
   const CREDENTIALS_PAGE_SIZE = 20;
   const credentialScopeFilters = ["users", "all", "domain", "local", "machines"] as const;
   const credentialTypeFilters = ["all", "ntlm", "password", "aes"] as const;
@@ -2196,7 +2196,7 @@
       }
 
       const result = (await response.json()) as LaunchInteractiveCommandResponse;
-      commandRunOutput = `Launched ${result.title} in ${result.terminal}. cfc-tk is not tracking this shell.`;
+      commandRunOutput = `Launched ${result.title} in ${result.terminal}. CFC-ImpUI is not tracking this shell.`;
     } catch (error) {
       commandError = error instanceof Error ? error.message : `Could not launch ${commandForm.commandKind}.`;
     } finally {
@@ -2329,7 +2329,7 @@
       }
 
       const result = (await response.json()) as LaunchInteractiveCommandResponse;
-      easyOutput = `Launched ${result.title} in ${result.terminal}. cfc-tk is not tracking this shell.`;
+      easyOutput = `Launched ${result.title} in ${result.terminal}. CFC-ImpUI is not tracking this shell.`;
     } catch (error) {
       easyError = error instanceof Error ? error.message : "Could not launch wmiexec.";
     } finally {
@@ -2339,7 +2339,7 @@
 </script>
 
 <svelte:head>
-  <title>CFC-TK</title>
+  <title>CFC-ImpUI</title>
 </svelte:head>
 
 <div class="min-h-screen bg-[#070b0d] text-[#e6edf0]">
@@ -2348,10 +2348,10 @@
     <header class="flex flex-col gap-5 border-b border-white/10 pb-5 md:flex-row md:items-center md:justify-between">
       <div class="flex items-center gap-4">
         <div class="flex h-12 w-12 items-center justify-center rounded-md border border-teal-300/25 bg-white/[0.04]">
-          <img src={logo} alt="CFC-TK" class="h-10 w-10 object-contain" />
+          <img src={logo} alt="CFC-ImpUI" class="h-10 w-10 object-contain" />
         </div>
         <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.28em] text-teal-200/70">CFC-TK</p>
+          <p class="text-xs font-semibold uppercase tracking-[0.28em] text-teal-200/70">CFC-ImpUI</p>
           <h1 class="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Control surface</h1>
         </div>
       </div>
@@ -3174,6 +3174,31 @@
                 </div>
               {/if}
 
+              <div class="grid min-w-0 gap-3 xl:grid-cols-2">
+                <label class="grid min-w-0 gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">KDC target</span>
+                  <select
+                    bind:value={commandForm.kdcTargetId}
+                    class="w-full min-w-0 max-w-full truncate rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-teal-200/45"
+                  >
+                    <option class="bg-[#0d1316]" value="">None</option>
+                    {#each commandTargets.filter((target) => target.os === "windows") as target}
+                      <option class="bg-[#0d1316]" value={String(target.id)}>
+                        {(target.hostname || target.ip) + (target.ip ? ` (${target.ip})` : "")}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="grid min-w-0 gap-2">
+                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">DC IP / KDC host override</span>
+                  <input
+                    bind:value={commandForm.kdcHost}
+                    class="w-full min-w-0 max-w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                    placeholder={selectedCommandKdcTarget?.ip || "optional, useful for domain/Kerberos"}
+                  />
+                </label>
+              </div>
+
               {#if commandForm.commandKind === "getTGT" || commandForm.commandKind === "ticketer"}
                 <div class="grid min-w-0 gap-3 2xl:grid-cols-2">
                   <label class="grid min-w-0 gap-2">
@@ -3202,31 +3227,6 @@
                   ></textarea>
                 </label>
               {/if}
-
-              <div class="grid min-w-0 gap-3 2xl:grid-cols-2">
-                <label class="grid min-w-0 gap-2">
-                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">KDC target</span>
-                  <select
-                    bind:value={commandForm.kdcTargetId}
-                    class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition focus:border-teal-200/45"
-                  >
-                    <option class="bg-[#0d1316]" value="">None</option>
-                    {#each commandTargets.filter((target) => target.os === "windows") as target}
-                      <option class="bg-[#0d1316]" value={String(target.id)}>
-                        {(target.hostname || target.ip) + (target.ip ? ` (${target.ip})` : "")}
-                      </option>
-                    {/each}
-                  </select>
-                </label>
-                <label class="grid min-w-0 gap-2">
-                  <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">DC IP / KDC host override</span>
-                  <input
-                    bind:value={commandForm.kdcHost}
-                    class="min-w-0 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
-                    placeholder={selectedCommandKdcTarget?.ip || "optional, useful for domain/Kerberos"}
-                  />
-                </label>
-              </div>
             </div>
           </div>
 
@@ -3293,7 +3293,7 @@
                 <p>
                   <span class="font-semibold text-white/80">{commandForm.commandKind}</span>
                   opens a local Linux terminal titled <code class="rounded bg-black/30 px-1 text-teal-100">team:box</code>.
-                  cfc-tk hands off the shell and does not capture its output.
+                  CFC-ImpUI hands off the shell and does not capture its output.
                 </p>
                 <p>
                   <span class="font-semibold text-white/80">Kerberos</span>

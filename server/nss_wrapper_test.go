@@ -51,14 +51,14 @@ func TestTerminalShellCommandIncludesCleanupAndWorkDir(t *testing.T) {
 		"red:dc01",
 		[]string{"NSS_WRAPPER_HOSTS=/tmp/cfc.hosts", "KRB5CCNAME=/tmp/admin.ccache"},
 		[]string{"impacket-wmiexec", "-k", "corp.local/admin@dc01.corp.local"},
-		"/opt/cfc-tk/server",
-		"/tmp/cfc-tk-launcher.sh",
+		"/opt/cfc-impui/server",
+		"/tmp/cfc-impui-launcher.sh",
 	)
 
 	for _, snippet := range []string{
-		"cd '/opt/cfc-tk/server'",
+		"cd '/opt/cfc-impui/server'",
 		"trap ",
-		"/tmp/cfc-tk-launcher.sh",
+		"/tmp/cfc-impui-launcher.sh",
 		"/tmp/cfc.hosts",
 		"'env' 'NSS_WRAPPER_HOSTS=/tmp/cfc.hosts' 'KRB5CCNAME=/tmp/admin.ccache'",
 		"'impacket-wmiexec' '-k' 'corp.local/admin@dc01.corp.local'",

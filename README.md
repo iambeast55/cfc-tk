@@ -1,21 +1,58 @@
-# CFC-TK
+# CFC-ImpUI
 
-CFC-TK now contains both the Svelte UI and the local Go API server in one project.
+CFC-ImpUI is a UI driven tool for impacket based commands, specifically built for CyberForce Red teamers. The idea being to give a way to handle multiple teams at once, and hopefully in a more organized single point manner.
+
+## Features
+
+- Separate team workspaces
+- Track domains and targets
+- Store credentials and Kerberos cache
+- Run `secretsdump` and import the results into the credential table
+- Generate Kerberos caches with `getTGT` and `ticketer`
+- Launch interactive shells with `wmiexec`, `smbexec`, and `dcomexec`
+- Run quick remote tasks with `wmiexec` or `psexec`
+- Save notes per team
+- Do simple network status checks and port scans
 
 ## Requirements
 
-- Node.js and npm
-- Go 1.24 or newer
+At a minimum:
 
-## Install
+- Node.js 20+
+- npm
+- Go 1.24+
+- Python 3
+- Impacket installed and available in `PATH`
+- `libnss-wrapper`
+
+## Installation
+
+Clone the repo, then install the UI and server dependencies.
 
 ```sh
 npm install
 cd server
 go mod download
+cd ..
 ```
 
-## Run Everything
+## Running it
+
+### Option 1:
+
+From the project root:
+
+```sh
+./ccfc-impui
+```
+
+- install Node packages if needed
+- build the UI
+- build the Go server
+- start the API at `http://localhost:8080`
+- serve the UI at `http://127.0.0.1:5173`
+
+### Option 2: dev mode
 
 From the project root:
 
@@ -23,27 +60,22 @@ From the project root:
 npm run dev
 ```
 
-This starts:
+That starts:
 
 - UI: `http://localhost:5173`
-- API server: `http://localhost:8080`
+- API: `http://localhost:8080`
 
-The UI calls the API at `http://localhost:8080`.
+### Option 3: run each side separately
 
-## Simple Ubuntu Run
-
-From the project root:
-
-```sh
-./ccfc-tk
-```
-
-The launcher installs Node dependencies if needed, builds the UI, builds the Go API server, starts the API on `http://localhost:8080`, and serves the UI on `http://127.0.0.1:5173`.
-
-## Run One Side
+UI:
 
 ```sh
 npm run dev:ui
+```
+
+Server:
+
+```sh
 npm run server:dev
 ```
 
@@ -54,14 +86,47 @@ npm run build
 npm run server:build
 ```
 
-## Project Layout
+## Data storage
+
+Local data is stored in:
 
 ```text
-cfc-tk/
-|-- src/       # Svelte UI
-|-- static/    # Static UI assets
-|-- server/    # Go REST API and SQLite storage
-`-- scripts/   # Development helpers
+server/teams.db
 ```
 
-The server stores local data in `server/teams.db`. That file is ignored by git and is created automatically if it does not exist.
+The database is created automatically if it does not exist.
+
+Kerberos cache files and generated artifacts stay on disk wherever you choose to save them from the UI.
+
+## Project layout
+
+```text
+cfc-impui/
+|-- src/       # Svelte UI
+|-- static/    # Static assets
+|-- server/    # Go API, SQLite logic, command runners
+|-- scripts/   # Dev helpers
+`-- ccfc-impui    # Simple launcher script
+```
+
+## Screenshots
+
+Add your screenshots here.
+
+### Dashboard
+
+![Dashboard screenshot](./docs/screenshots/dashboard.png)
+
+### Command tab
+
+![Command tab screenshot](./docs/screenshots/command-tab.png)
+
+### Credentials
+
+![Credentials screenshot](./docs/screenshots/credentials.png)
+
+### Easy mode
+
+![Easy mode screenshot](./docs/screenshots/easy-mode.png)
+
+If you do not want broken image links before adding screenshots, just create the folders and drop files in later.

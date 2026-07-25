@@ -1,6 +1,6 @@
-# CFC-TK Server
+# CFC-ImpUI Server
 
-Local Go REST API for CFC-TK team data. It stores teams in a SQLite database.
+Local Go REST API for CFC-ImpUI team data. It stores teams in a SQLite database.
 
 ## Run
 

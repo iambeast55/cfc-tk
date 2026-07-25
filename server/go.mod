@@ -1,4 +1,4 @@
-module cfc-tk-server
+module cfc-impui-server
 
 go 1.24.0
 
