@@ -216,7 +216,7 @@
   const BACKEND_URL = "http://localhost:8765";
   const IMPACKET_STYLE_KEY = "cfc-impui.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-impui.impacketCustomTools";
-  const CREDENTIALS_PAGE_SIZE = 20;
+  const CREDENTIALS_PAGE_SIZE = 12;
   const credentialScopeFilters = ["users", "all", "domain", "local", "machines"] as const;
   const credentialTypeFilters = ["all", "ntlm", "password", "aes"] as const;
 
@@ -2812,12 +2812,12 @@
           </div>
         </section>
       {:else if activeTab === "command"}
-        <section class="grid min-w-0 gap-4 xl:max-h-[calc(100vh-14rem)] xl:grid-cols-[minmax(0,440px)_minmax(0,1fr)] xl:items-start">
-          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-4 xl:min-h-0 xl:overflow-y-auto">
+        <section class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+          <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <Radar class="h-6 w-6 text-teal-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Command</h2>
 
-            <div class="mt-4 grid gap-3">
+            <div class="mt-6 grid gap-3">
               <label class="grid gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
                 <select
@@ -3216,7 +3216,7 @@
                   <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Notes</span>
                   <textarea
                     bind:value={commandForm.notes}
-                    class="min-h-16 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
+                    class="min-h-20 rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-teal-200/45"
                     placeholder="optional"
                   ></textarea>
                 </label>
@@ -3224,7 +3224,7 @@
             </div>
           </div>
 
-          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-4 xl:min-h-0 xl:overflow-y-auto">
+          <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Preview</p>
@@ -3263,7 +3263,7 @@
               <p class="mt-5 rounded-md border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">{commandError}</p>
             {/if}
 
-            <pre class="mt-4 min-h-28 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-3 font-mono text-sm leading-5 text-teal-100">{commandPreview}</pre>
+            <pre class="mt-5 min-h-40 overflow-x-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/40 p-4 font-mono text-sm leading-6 text-teal-100">{commandPreview}</pre>
 
             {#if commandRunOutput}
               <div class="mt-4">
@@ -3306,7 +3306,7 @@
               {/if}
             </div>
 
-            <div class="mt-5 border-t border-white/10 pt-4">
+            <div class="mt-6 border-t border-white/10 pt-5">
               <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Saved caches</p>
