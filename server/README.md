@@ -16,7 +16,7 @@ From this folder:
 go run .
 ```
 
-The server starts at `http://localhost:8080`.
+The server starts at `http://localhost:8765`.
 
 ## Endpoints
 

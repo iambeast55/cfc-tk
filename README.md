@@ -49,7 +49,7 @@ From the project root:
 - install Node packages if needed
 - build the UI
 - build the Go server
-- start the API at `http://localhost:8080`
+- start the API at `http://localhost:8765`
 - serve the UI at `http://127.0.0.1:5173`
 
 ### Option 2: dev mode
@@ -63,7 +63,7 @@ npm run dev
 That starts:
 
 - UI: `http://localhost:5173`
-- API: `http://localhost:8080`
+- API: `http://localhost:8765`
 
 ### Option 3: run each side separately
 

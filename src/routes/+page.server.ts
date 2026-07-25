@@ -1,7 +1,7 @@
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
 
-const BACKEND_URL = 'http://localhost:8080'; // Replace with your backend URL
+const BACKEND_URL = 'http://localhost:8765';
 
 export const load: PageServerLoad = async () => {
 	try {

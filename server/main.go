@@ -66,8 +66,8 @@ func main() {
 	router.Use(corsMiddleware)
 	router.Use(loggingMiddleware)
 
-	log.Println("Server starting on :8080")
-	if err := http.ListenAndServe(":8080", router); err != nil {
+	log.Println("Server starting on :8765")
+	if err := http.ListenAndServe(":8765", router); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }

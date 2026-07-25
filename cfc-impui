@@ -38,7 +38,7 @@ echo "[CFC-ImpUI] Building API server..."
 mkdir -p "$ROOT_DIR/server/bin"
 (cd "$ROOT_DIR/server" && go build -buildvcs=false -o "$SERVER_BIN" .)
 
-echo "[CFC-ImpUI] Starting API server on http://localhost:8080"
+echo "[CFC-ImpUI] Starting API server on http://localhost:8765"
 (cd "$ROOT_DIR/server" && "$SERVER_BIN") &
 SERVER_PID=$!
 

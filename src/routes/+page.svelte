@@ -213,7 +213,7 @@
 
   type TabId = "main" | "easy" | "command" | "tasks" | "notes" | "network" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "psexec" | "smbexec" | "dcomexec";
-  const BACKEND_URL = "http://localhost:8080";
+  const BACKEND_URL = "http://localhost:8765";
   const IMPACKET_STYLE_KEY = "cfc-impui.impacketCommandStyle";
   const IMPACKET_CUSTOM_TOOLS_KEY = "cfc-impui.impacketCustomTools";
   const CREDENTIALS_PAGE_SIZE = 20;
@@ -2367,7 +2367,7 @@
         </div>
         <div class="rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
           <p class="text-[11px] uppercase tracking-[0.2em] text-white/45">API</p>
-          <p class="mt-1 text-xl font-semibold text-rose-100">8080</p>
+          <p class="mt-1 text-xl font-semibold text-rose-100">8765</p>
         </div>
       </div>
     </header>
@@ -2655,9 +2655,6 @@
           <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <ShieldCheck class="h-6 w-6 text-lime-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Easy mode</h2>
-            <p class="mt-2 text-sm leading-6 text-white/60">
-              Pick the pieces, then run the common moves without rebuilding the command form.
-            </p>
 
             <div class="mt-6 grid gap-3">
               <label class="grid min-w-0 gap-2">
@@ -3316,7 +3313,6 @@
               <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Saved caches</p>
-                  <p class="mt-1 text-sm text-white/55">Cache files stay on disk; this list stores paths and recipe metadata.</p>
                 </div>
                 {#if selectedKerberosCache}
                   <Button type="button" class="border border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.1]" onclick={() => handleUseKerberosCache(selectedKerberosCache)}>
@@ -3615,9 +3611,6 @@
           <div class="rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <NotebookPen class="h-6 w-6 text-lime-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Notes</h2>
-            <p class="mt-2 text-sm leading-6 text-white/60">
-              Keep quick field notes here while the workspace stays quiet and readable.
-            </p>
             <label class="mt-5 block">
               <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
               <select
@@ -3677,9 +3670,6 @@
           <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <Radar class="h-6 w-6 text-teal-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Network Status</h2>
-            <p class="mt-2 text-sm leading-6 text-white/60">
-              Track currently open Windows service ports on known targets.
-            </p>
 
             <label class="mt-5 block">
               <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
@@ -3813,9 +3803,6 @@
           <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <KeyRound class="h-6 w-6 text-rose-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Credentials</h2>
-            <p class="mt-2 text-sm leading-6 text-white/60">
-              Load a team credential database, then add Windows or Linux material as you pull it from secretsdump output or manual triage.
-            </p>
 
             <label class="mt-6 grid gap-2">
               <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team database</span>
@@ -4147,7 +4134,6 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-lime-200/60">Task credential</p>
                 <h2 class="mt-2 text-xl font-semibold text-white">Choose for remote task</h2>
-                <p class="mt-2 text-sm text-white/55">Search credentials supported by wmiexec and psexec.</p>
               </div>
               <Button
                 type="button"
@@ -4242,7 +4228,6 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200/60">Command credential</p>
                 <h2 class="mt-2 text-xl font-semibold text-white">Choose for {commandForm.commandKind}</h2>
-                <p class="mt-2 text-sm text-white/55">Search inside credentials that match the current command and auth mode.</p>
               </div>
               <Button
                 type="button"
@@ -4323,7 +4308,7 @@
 
     <footer class="flex flex-col gap-2 border-t border-white/10 py-4 text-xs text-white/40 sm:flex-row sm:items-center sm:justify-between">
       <span class="flex items-center gap-2"><CircleDot class="h-3 w-3 text-teal-200" /> Static tab workspace</span>
-      <span class="flex items-center gap-2"><Activity class="h-3 w-3 text-lime-200" /> Server expected on localhost:8080</span>
+      <span class="flex items-center gap-2"><Activity class="h-3 w-3 text-lime-200" /> Server expected on localhost:8765</span>
     </footer>
   </div>
 </div>
