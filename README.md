@@ -1,6 +1,6 @@
 # CFC-ImpUI
 
-CFC-ImpUI is a UI driven tool for impacket based commands, specifically built for CyberForce Red teamers. The idea being to give a way to handle multiple teams at once, and hopefully in a more organized single point manner.
+CFC-ImpUI is a UI driven tool for Impacket based commands, specifically built for cyber competitions. The idea being to give a way to handle multiple teams at once, and hopefully in a more organized single point manner.
 
 ## Features
 
