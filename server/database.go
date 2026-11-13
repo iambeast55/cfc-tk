@@ -23,7 +23,7 @@ var ErrNoNetworkTargets = errors.New("no targets to scan")
 
 func initDB() error {
 	var err error
-	db, err = sql.Open("sqlite", "file:teams.db?cache=shared")
+	db, err = sql.Open("sqlite", "file:teams.db?cache=shared&_pragma=foreign_keys(1)")
 	if err != nil {
 		return err
 	}
@@ -375,7 +375,26 @@ func UpdateTeamByName(name string, req UpdateTeamRequest) (*Team, error) {
 
 // DeleteTeamByName deletes a team by name
 func DeleteTeamByName(name string) error {
-	_, err := db.Exec("DELETE FROM teams WHERE name = ?", name)
+	result, err := db.Exec("DELETE FROM teams WHERE name = ?", name)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err == nil && count == 0 {
+		return sql.ErrNoRows
+	}
+	return err
+}
+
+func DeleteDomainByID(teamName string, id int) error {
+	result, err := db.Exec("DELETE FROM domains WHERE team_name = ? AND id = ?", teamName, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err == nil && count == 0 {
+		return sql.ErrNoRows
+	}
 	return err
 }
 

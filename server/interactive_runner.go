@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type terminalSpec struct {
@@ -20,6 +22,9 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 	}
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("interactive terminal launch is supported on Linux only")
+	}
+	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		return nil, errors.New("no graphical desktop session detected; start CFCBench from a terminal in your Kali desktop as the logged-in user")
 	}
 	if !isInteractiveCommandKind(req.CommandKind) {
 		return nil, errors.New("interactive command must be wmiexec, smbexec, or dcomexec")
@@ -41,24 +46,40 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 	if err != nil {
 		return nil, err
 	}
-	launcherPath, err := writeTerminalLauncherScript(title, execSpec.Env, fullCommand, execSpec.WorkDir)
+	return launchDesktopTerminal(title, fullCommand, execSpec.Env, execSpec.WorkDir, execSpec.Cleanup)
+}
+
+func launchDesktopTerminal(title string, fullCommand, env []string, workDir string, cleanup func()) (*LaunchInteractiveCommandResponse, error) {
+	if runtime.GOOS != "linux" || (os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "") {
+		cleanup()
+		return nil, errors.New("start CFCBench from your Linux graphical desktop terminal to open a terminal window")
+	}
+	startupDir, err := os.MkdirTemp("", "cfc-impui-terminal-*")
 	if err != nil {
-		execSpec.Cleanup()
+		cleanup()
+		return nil, err
+	}
+	defer os.RemoveAll(startupDir)
+	readyPath := filepath.Join(startupDir, "ready")
+	launcherPath, err := writeTerminalLauncherScript(title, env, fullCommand, workDir, readyPath)
+	if err != nil {
+		cleanup()
 		return nil, err
 	}
 
 	terminal, terminalArgs, err := terminalLaunchCommand(title, launcherPath)
 	if err != nil {
 		_ = os.Remove(launcherPath)
-		execSpec.Cleanup()
+		cleanup()
 		return nil, err
 	}
 
 	cmd := exec.Command(terminal, terminalArgs...)
-	cmd.Dir = execSpec.WorkDir
-	if err := cmd.Start(); err != nil {
-		execSpec.Cleanup()
-		return nil, fmt.Errorf("failed to launch terminal: %w", err)
+	cmd.Dir = workDir
+	if err := startTerminalAndWait(cmd, readyPath, filepath.Join(startupDir, "startup.log"), 8*time.Second); err != nil {
+		_ = os.Remove(launcherPath)
+		cleanup()
+		return nil, err
 	}
 
 	return &LaunchInteractiveCommandResponse{
@@ -66,6 +87,50 @@ func LaunchInteractiveCommand(teamName string, req LaunchInteractiveCommandReque
 		Terminal: terminal,
 		Title:    title,
 	}, nil
+}
+
+// Some terminal clients exit after handing off to a desktop service. The script
+// acknowledgment, rather than the client process status, confirms a terminal.
+func startTerminalAndWait(cmd *exec.Cmd, readyPath, logPath string, timeout time.Duration) error {
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start terminal: %w", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	poll := time.NewTicker(50 * time.Millisecond)
+	defer poll.Stop()
+	diagnostic := func(reason string) error {
+		data, _ := os.ReadFile(logPath)
+		message := strings.TrimSpace(string(data))
+		if len(message) > 2048 {
+			message = message[:2048]
+		}
+		return fmt.Errorf("%s: %s. Start CFCBench inside the Linux desktop session as your normal user; check DISPLAY/Wayland and D-Bus access", reason, message)
+	}
+	for {
+		if _, err := os.Stat(readyPath); err == nil {
+			return nil
+		}
+		select {
+		case err := <-exited:
+			if err != nil {
+				return diagnostic("terminal exited before opening the shell")
+			}
+			// A successful D-Bus handoff can precede the script starting.
+		case <-poll.C:
+		case <-timer.C:
+			_ = cmd.Process.Kill()
+			return diagnostic("terminal did not confirm an interactive session")
+		}
+	}
 }
 
 func interactiveCommandArgs(req LaunchInteractiveCommandRequest) ([]string, []string, error) {
@@ -172,22 +237,33 @@ func terminalShellCommand(title string, env []string, command []string, workDir 
 		quotedCleanup = append(quotedCleanup, shQuote(part))
 	}
 	lines = append(lines, "trap "+shQuote(strings.Join(quotedCleanup, " ")+" >/dev/null 2>&1 || true")+" EXIT")
+	if path := envValue(env, "CFCBENCH_PASSWORD_FILE"); path != "" {
+		lines = append(lines, "trap "+shQuote(strings.Join(quotedCleanup, " ")+"; rm -f -- "+shQuote(path))+" EXIT")
+	}
 	lines = append(lines, strings.Join(quoted, " "))
 	lines = append(lines, "status=$?")
+	if path := envValue(env, "CFCBENCH_PASSWORD_FILE"); path != "" {
+		lines = append(lines, "rm -f -- "+shQuote(path))
+	}
 	lines = append(lines, "echo")
-	lines = append(lines, "printf "+shQuote(fmt.Sprintf("cfc-impui: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
+	lines = append(lines, "printf "+shQuote(fmt.Sprintf("CFCBench: %s exited with status %%s\\n", commandName(command)))+" \"$status\"")
 	lines = append(lines, "read -r -p 'Press Enter to close this terminal...' _")
 	lines = append(lines, "exit \"$status\"")
 	return strings.Join(lines, "; ")
 }
 
-func writeTerminalLauncherScript(title string, env []string, command []string, workDir string) (string, error) {
+func writeTerminalLauncherScript(title string, env []string, command []string, workDir string, readyPaths ...string) (string, error) {
 	file, err := os.CreateTemp("", "cfc-impui-launcher-*.sh")
 	if err != nil {
 		return "", fmt.Errorf("failed to create terminal launcher: %w", err)
 	}
 	launcherPath := file.Name()
-	script := "#!/usr/bin/env bash\n" + terminalShellCommand(title, env, command, workDir, launcherPath) + "\n"
+	preamble := ""
+	if len(readyPaths) > 0 {
+		preamble = "if ! [ -t 0 ] || ! [ -t 1 ]; then echo 'No interactive terminal attached' >&2; exit 1; fi\n" +
+			"printf ready > " + shQuote(readyPaths[0]) + " || exit 1\n"
+	}
+	script := "#!/usr/bin/env bash\n" + preamble + terminalShellCommand(title, env, command, workDir, launcherPath) + "\n"
 	if _, err := file.WriteString(script); err != nil {
 		file.Close()
 		_ = os.Remove(launcherPath)
@@ -206,6 +282,9 @@ func writeTerminalLauncherScript(title string, env []string, command []string, w
 
 func terminalLaunchCommand(title string, launcherPath string) (string, []string, error) {
 	terminals := []terminalSpec{
+		{"qterminal", func(title string, launcherPath string) []string {
+			return []string{"-e", "bash", "--noprofile", "--norc", launcherPath}
+		}},
 		{"gnome-terminal", func(title string, launcherPath string) []string {
 			return []string{"--title", title, "--", "bash", "--noprofile", "--norc", launcherPath}
 		}},
@@ -219,7 +298,7 @@ func terminalLaunchCommand(title string, launcherPath string) (string, []string,
 			return []string{"--new-tab", "-p", "tabtitle=" + title, "-e", "bash", "--noprofile", "--norc", launcherPath}
 		}},
 		{"x-terminal-emulator", func(title string, launcherPath string) []string {
-			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", launcherPath}
+			return []string{"-e", "bash", "--noprofile", "--norc", launcherPath}
 		}},
 		{"xterm", func(title string, launcherPath string) []string {
 			return []string{"-T", title, "-e", "bash", "--noprofile", "--norc", launcherPath}
@@ -233,7 +312,7 @@ func terminalLaunchCommand(title string, launcherPath string) (string, []string,
 		}
 	}
 
-	return "", nil, errors.New("no supported terminal found; install gnome-terminal, xfce4-terminal, konsole, mate-terminal, x-terminal-emulator, or xterm")
+	return "", nil, errors.New("no supported terminal found; install qterminal, gnome-terminal, xfce4-terminal, konsole, mate-terminal, x-terminal-emulator, or xterm")
 }
 
 func shQuote(value string) string {

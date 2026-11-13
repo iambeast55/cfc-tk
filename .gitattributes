@@ -1,2 +1,4 @@
 ccfc-tk text eol=lf
+cfcbench text eol=lf
+cfc-impui text eol=lf
 *.sh text eol=lf

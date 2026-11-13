@@ -151,6 +151,10 @@ func deleteTeam(w http.ResponseWriter, r *http.Request) {
 	log.Printf("→ Deleting team name: %s", name)
 	err := DeleteTeamByName(name)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
 		log.Printf("✗ Error deleting team: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -287,6 +291,23 @@ func saveNetworkPollingConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resetNetworkPolling()
+	json.NewEncoder(w).Encode(config)
+}
+
+func stopNetworkPolling(w http.ResponseWriter, r *http.Request) {
+	current, err := GetNetworkPollingConfig()
+	if err != nil {
+		http.Error(w, "Could not load polling config", 500)
+		return
+	}
+	config, err := SaveNetworkPollingConfig(SaveNetworkPollingConfigRequest{Enabled: false, IntervalSeconds: current.IntervalSeconds})
+	if err != nil {
+		http.Error(w, "Could not stop polling", 500)
+		return
+	}
+	resetNetworkPolling()
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)
 }
 
@@ -769,6 +790,25 @@ func createTarget(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(target)
+}
+
+func deleteDomain(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil || id <= 0 {
+		http.Error(w, "A valid domain ID is required", http.StatusBadRequest)
+		return
+	}
+	if err := DeleteDomainByID(vars["name"], id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Domain not found for this team", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error deleting domain: %v", err)
+		http.Error(w, "Failed to delete domain", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func deleteTarget(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "teams": [
+    {
+      "name": "Blue Team",
+      "subnetId": 10,
+      "domains": ["corp.example"],
+      "targets": [
+        {"hostname": "dc01", "ip": "192.0.2.10", "os": "windows", "domain": "corp.example"},
+        {"hostname": "web01", "ip": "192.0.2.20", "os": "linux"}
+      ]
+    }
+  ]
+}

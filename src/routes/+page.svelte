@@ -1,13 +1,11 @@
 <script lang="ts">
   import logo from "$lib/assets/logo.png";
+  import LinuxTools from "$lib/components/app/LinuxTools.svelte";
   import { onMount, untrack } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import { invalidateAll } from "$app/navigation";
   import {
-    Activity,
-    CircleDot,
     KeyRound,
     NotebookPen,
     Play,
@@ -211,7 +209,7 @@
     credentialId: string;
   }
 
-  type TabId = "main" | "easy" | "command" | "tasks" | "notes" | "network" | "credentials";
+  type TabId = "main" | "easy" | "command" | "tasks" | "linux" | "notes" | "network" | "credentials";
   type ImpacketTool = "secretsdump" | "getTGT" | "ticketer" | "wmiexec" | "psexec" | "smbexec" | "dcomexec";
   const BACKEND_URL = "http://localhost:8765";
   const IMPACKET_STYLE_KEY = "cfc-impui.impacketCommandStyle";
@@ -225,6 +223,14 @@
   let newTeam = $state<Team>({ name: "", subnetId: null });
   let busy = $state(false);
   let popupError = $state("");
+  let teamList = $state<Team[] | null>(null);
+  let teamDeleting = $state(false);
+  let teamDeleteError = $state("");
+  let domainDeletingId = $state<number | null>(null);
+  let configFile = $state<File | null>(null);
+  let configImporting = $state(false);
+  let configImportError = $state("");
+  let configImportResult = $state("");
   let selectedTeam = $state("");
   let domains = $state<Domain[]>([]);
   let domainsLoading = $state(false);
@@ -386,12 +392,13 @@
     { id: "easy", label: "Easy", eyebrow: "guided" },
     { id: "command", label: "Command", eyebrow: "run" },
     { id: "tasks", label: "Tasks", eyebrow: "remote" },
+    { id: "linux", label: "Linux", eyebrow: "ssh / scp" },
     { id: "notes", label: "Notes", eyebrow: "field" },
     { id: "network", label: "Network", eyebrow: "status" },
     { id: "credentials", label: "Credentials", eyebrow: "vault" }
   ];
 
-  const teams = $derived((data.teams ?? []) as Team[]);
+  const teams = $derived(teamList ?? ((data.teams ?? []) as Team[]));
   const targetTotal = $derived(
     targets.length || teams.reduce((total, team) => total + (team.targets?.length ?? 0), 0)
   );
@@ -693,12 +700,42 @@
 
   const openPortLabel = (port: OpenPort) => {
     const names: Record<number, string> = {
+      21: "FTP",
+      22: "SSH",
+      25: "SMTP",
+      53: "DNS",
+      80: "HTTP",
+      88: "Kerberos",
+      110: "POP3",
+      111: "RPCbind",
       135: "RPC",
       139: "NetBIOS",
+      143: "IMAP",
       389: "LDAP",
+      443: "HTTPS",
       445: "SMB",
+      464: "Kerberos password",
+      465: "SMTPS",
+      587: "SMTP submission",
+      636: "LDAPS",
+      993: "IMAPS",
+      995: "POP3S",
+      1433: "MSSQL",
+      2049: "NFS",
+      3268: "Global Catalog",
+      3269: "Global Catalog TLS",
+      3306: "MySQL",
       3389: "RDP",
-      5985: "WinRM"
+      5432: "PostgreSQL",
+      5900: "VNC",
+      5985: "WinRM",
+      5986: "WinRM HTTPS",
+      6379: "Redis",
+      8000: "HTTP alt",
+      8080: "HTTP proxy/alt",
+      8443: "HTTPS alt",
+      9200: "Elasticsearch",
+      27017: "MongoDB"
     };
     return `${port.port} ${port.service || names[port.port] || ""}`.trim();
   };
@@ -1288,6 +1325,18 @@
     }
   };
 
+  const handleStopNetworkPolling = async () => {
+    networkConfigSaving = true;
+    networkConfigError = "";
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/network-status/stop`, { method: "POST" });
+      if (!response.ok) throw new Error(await readError(response, "Could not stop polling."));
+      networkConfig = (await response.json()) as NetworkPollingConfig;
+    } catch (error) {
+      networkConfigError = error instanceof Error ? error.message : "Could not stop polling.";
+    } finally { networkConfigSaving = false; }
+  };
+
   const handleSaveNetworkConfig = async () => {
     networkConfigSaving = true;
     networkConfigError = "";
@@ -1559,6 +1608,9 @@
   });
 
   onMount(() => {
+    void refreshTeams().catch((error) => {
+      teamDeleteError = error instanceof Error ? error.message : "Could not load teams.";
+    });
     void loadNetworkConfig();
 
     const savedStyle = localStorage.getItem(IMPACKET_STYLE_KEY);
@@ -1625,7 +1677,7 @@
 
       newTeam = { name: "", subnetId: null };
       form.reset();
-      await invalidateAll();
+      await refreshTeams();
     } catch (error) {
       popupError = error instanceof Error ? error.message : "Could not add team.";
     } finally {
@@ -1633,8 +1685,99 @@
     }
   };
 
+  const refreshTeams = async () => {
+    const response = await fetch(`${BACKEND_URL}/api/teams`);
+    if (!response.ok) throw new Error(await readError(response, "Could not refresh teams."));
+    teamList = (await response.json()) as Team[];
+  };
+
+  const handleImportConfig = async (event: SubmitEvent) => {
+    event.preventDefault();
+    if (!configFile || configImporting) return;
+    configImportError = "";
+    configImportResult = "";
+    if (configFile.size > 2 * 1024 * 1024) {
+      configImportError = "Config must be 2 MB or smaller.";
+      return;
+    }
+    configImporting = true;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/config/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: await configFile.text()
+      });
+      if (!response.ok) throw new Error(await readError(response, "Could not import config."));
+      const result = await response.json();
+      configImportResult = `Added ${result.teamsAdded} teams, ${result.domainsAdded} domains, ${result.targetsAdded} targets. ${result.skipped} existing records skipped.`;
+      lastLoadedTargetTeam = "";
+      lastLoadedCommandTeam = "";
+      lastLoadedEasyTeam = "";
+      lastLoadedCredentialTeam = "";
+      lastLoadedNotesTeam = "";
+      lastLoadedNetworkTeam = "";
+      lastLoadedTaskTeam = "";
+      await refreshTeams();
+    } catch (error) {
+      configImportError = error instanceof Error ? error.message : "Could not import config.";
+    } finally {
+      configImporting = false;
+    }
+  };
+
+  const handleDeleteTeam = async () => {
+    const teamName = selectedTeam;
+    if (!teamName || teamDeleting) return;
+    if (!confirm(`Delete team ${teamName} and all its targets, domains, credentials, notes, and saved history?`)) return;
+    teamDeleting = true;
+    teamDeleteError = "";
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await readError(response, "Could not delete team."));
+      // Invalidate team caches, including the delete-last-team/recreate-name case.
+      lastLoadedTargetTeam = "";
+      lastLoadedCommandTeam = "";
+      lastLoadedEasyTeam = "";
+      lastLoadedCredentialTeam = "";
+      lastLoadedNotesTeam = "";
+      lastLoadedNetworkTeam = "";
+      lastLoadedTaskTeam = "";
+      teamList = teams.filter((team) => team.name !== teamName);
+      await refreshTeams();
+    } catch (error) {
+      teamDeleteError = error instanceof Error ? error.message : "Could not delete team.";
+    } finally {
+      teamDeleting = false;
+    }
+  };
+
+  const handleDeleteDomain = async (domain: Domain) => {
+    if (domainDeletingId !== null) return;
+    if (!confirm(`Delete domain ${domain.name}? Its targets will remain as standalone hosts.`)) return;
+    domainDeletingId = domain.id;
+    domainError = "";
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/teams/${encodeURIComponent(domain.teamName)}/domains/${domain.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await readError(response, "Could not delete domain."));
+      if (selectedTeam === domain.teamName) {
+        if (targetForm.domainId === String(domain.id)) {
+          targetForm = { ...targetForm, domainMode: "standalone", domainId: "" };
+        }
+        await loadDomains(domain.teamName);
+        await loadTargets(domain.teamName);
+      }
+      if (commandForm.teamName === domain.teamName) await loadCommandTargets(domain.teamName);
+      if (easyMode.teamName === domain.teamName) await loadEasyModeData(domain.teamName);
+    } catch (error) {
+      domainError = error instanceof Error ? error.message : "Could not delete domain.";
+    } finally {
+      domainDeletingId = null;
+    }
+  };
+
   const handleAddCredential = async (event: SubmitEvent) => {
     event.preventDefault();
+    const teamName = selectedCredentialTeam;
     credentialsError = "";
     credentialBusy = true;
 
@@ -1652,7 +1795,7 @@
 
     try {
       const response = await fetch(
-        `${BACKEND_URL}/api/teams/${encodeURIComponent(selectedCredentialTeam)}/credentials`,
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/credentials`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1675,7 +1818,12 @@
         host: "",
         ip: ""
       };
-      await loadCredentials(selectedCredentialTeam);
+      await Promise.all([
+        selectedCredentialTeam === teamName ? loadCredentials(teamName) : Promise.resolve(),
+        easyMode.teamName === teamName ? loadEasyModeData(teamName) : Promise.resolve(),
+        commandForm.teamName === teamName ? loadCommandCredentials(teamName) : Promise.resolve(),
+        selectedTaskTeam === teamName ? loadRemoteTaskData(teamName) : Promise.resolve()
+      ]);
     } catch (error) {
       credentialsError = error instanceof Error ? error.message : "Could not add credential.";
     } finally {
@@ -1684,6 +1832,7 @@
   };
 
   const handleClearCredentials = async () => {
+    const teamName = selectedCredentialTeam;
     credentialsError = "";
 
     if (!selectedCredentialTeam) {
@@ -1697,7 +1846,7 @@
     credentialsClearing = true;
     try {
       const response = await fetch(
-        `${BACKEND_URL}/api/teams/${encodeURIComponent(selectedCredentialTeam)}/credentials`,
+        `${BACKEND_URL}/api/teams/${encodeURIComponent(teamName)}/credentials`,
         { method: "DELETE" }
       );
 
@@ -1706,9 +1855,17 @@
         return;
       }
 
-      credentials = [];
-      if (commandForm.teamName === selectedCredentialTeam) {
+      if (selectedCredentialTeam === teamName) credentials = [];
+      if (commandForm.teamName === teamName) {
         commandCredentials = [];
+      }
+      if (easyMode.teamName === teamName) {
+        easyCredentials = [];
+        patchEasyMode({ credentialId: "" });
+      }
+      if (selectedTaskTeam === teamName) {
+        taskCredentials = [];
+        taskForm = { ...taskForm, credentialId: "" };
       }
     } catch (error) {
       credentialsError = error instanceof Error ? error.message : "Could not clear credentials.";
@@ -2197,7 +2354,7 @@
       }
 
       const result = (await response.json()) as LaunchInteractiveCommandResponse;
-      commandRunOutput = `Launched ${result.title} in ${result.terminal}. CFC-ImpUI is not tracking this shell.`;
+      commandRunOutput = `Launched ${result.title} in ${result.terminal}. CFCBench is not tracking this shell.`;
     } catch (error) {
       commandError = error instanceof Error ? error.message : `Could not launch ${commandForm.commandKind}.`;
     } finally {
@@ -2330,7 +2487,7 @@
       }
 
       const result = (await response.json()) as LaunchInteractiveCommandResponse;
-      easyOutput = `Launched ${result.title} in ${result.terminal}. CFC-ImpUI is not tracking this shell.`;
+      easyOutput = `Launched ${result.title} in ${result.terminal}. CFCBench is not tracking this shell.`;
     } catch (error) {
       easyError = error instanceof Error ? error.message : "Could not launch wmiexec.";
     } finally {
@@ -2340,7 +2497,7 @@
 </script>
 
 <svelte:head>
-  <title>CFC-ImpUI</title>
+  <title>CFCBench</title>
 </svelte:head>
 
 <div class="min-h-screen bg-[#070b0d] text-[#e6edf0]">
@@ -2349,15 +2506,15 @@
     <header class="flex flex-col gap-4 border-b border-white/10 pb-4 md:flex-row md:items-center md:justify-between">
       <div class="flex items-center gap-4">
         <div class="flex h-12 w-12 items-center justify-center rounded-md border border-teal-300/25 bg-white/[0.04]">
-          <img src={logo} alt="CFC-ImpUI" class="h-10 w-10 object-contain" />
+          <img src={logo} alt="CFCBench" class="h-10 w-10 object-contain" />
         </div>
         <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.28em] text-teal-200/70">CFC-ImpUI</p>
+          <p class="text-xs font-semibold uppercase tracking-[0.28em] text-teal-200/70">CFCBench</p>
           <h1 class="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Control surface</h1>
         </div>
       </div>
 
-      <div class="grid grid-cols-3 gap-2 text-sm">
+      <div class="grid grid-cols-2 gap-2 text-sm">
         <div class="rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
           <p class="text-[11px] uppercase tracking-[0.2em] text-white/45">Teams</p>
           <p class="mt-1 text-xl font-semibold text-teal-100">{teams.length}</p>
@@ -2365,10 +2522,6 @@
         <div class="rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
           <p class="text-[11px] uppercase tracking-[0.2em] text-white/45">Targets</p>
           <p class="mt-1 text-xl font-semibold text-lime-100">{targetTotal}</p>
-        </div>
-        <div class="rounded-md border border-white/10 bg-white/[0.04] px-4 py-3">
-          <p class="text-[11px] uppercase tracking-[0.2em] text-white/45">API</p>
-          <p class="mt-1 text-xl font-semibold text-rose-100">8765</p>
         </div>
       </div>
     </header>
@@ -2421,6 +2574,16 @@
               </select>
             </label>
 
+            <Button type="button" variant="ghost" disabled={!selectedTeam || teamDeleting}
+              class="mt-3 border border-rose-300/20 text-rose-100 hover:bg-rose-300/10"
+              onclick={handleDeleteTeam}>
+              <Trash2 class="h-4 w-4" />
+              {teamDeleting ? "Deleting..." : "Delete selected team"}
+            </Button>
+            {#if teamDeleteError}
+              <p role="alert" class="mt-3 text-sm text-rose-100">{teamDeleteError}</p>
+            {/if}
+
             <div class="mt-5 rounded-md border border-white/10 bg-white/[0.03] p-4">
               <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -2447,7 +2610,16 @@
                   <span class="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/55">No domains yet</span>
                 {:else}
                   {#each domains as domain (domain.id)}
-                    <span class="rounded-md border border-lime-200/20 bg-lime-200/10 px-3 py-2 text-sm text-lime-100">{domain.name}</span>
+                    <span class="inline-flex max-w-full items-center gap-2 rounded-md border border-lime-200/20 bg-lime-200/10 px-3 py-2 text-sm text-lime-100">
+                      <span class="min-w-0 break-all">{domain.name}</span>
+                      <Button type="button" variant="ghost" size="icon-sm"
+                        aria-label={`Delete domain ${domain.name}`}
+                        disabled={domainDeletingId !== null}
+                        class="shrink-0 text-rose-100 hover:bg-rose-300/10"
+                        onclick={() => handleDeleteDomain(domain)}>
+                        <Trash2 class="h-4 w-4" />
+                      </Button>
+                    </span>
                   {/each}
                 {/if}
               </div>
@@ -2649,6 +2821,24 @@
               </Button>
             </form>
           </div>
+          <section class="min-w-0 border-t border-white/10 pt-5">
+            <h2 class="text-lg font-semibold text-white">Import config</h2>
+            <p class="mt-2 text-sm text-white/60">Add teams, domains, and targets from JSON. Matching records are kept; conflicts cancel the import.</p>
+            <a href="/config-example.json" download class="mt-3 inline-block text-sm text-teal-100 underline">Download example config</a>
+            <form class="mt-4 grid min-w-0 gap-3" onsubmit={handleImportConfig}>
+              <label class="grid min-w-0 gap-2 text-sm text-white/70">
+                Config file (.json, up to 2 MB)
+                <input type="file" accept=".json,application/json" disabled={configImporting}
+                  onchange={(event) => { configFile = event.currentTarget.files?.[0] ?? null; configImportResult = ""; configImportError = ""; }}
+                  class="w-full min-w-0 text-sm text-white/70" />
+              </label>
+              <Button type="submit" disabled={!configFile || configImporting} class="bg-teal-200 text-slate-950 hover:bg-teal-100">
+                {configImporting ? "Importing..." : "Import config"}
+              </Button>
+              {#if configImportError}<p role="alert" class="break-words text-sm text-rose-100">{configImportError}</p>{/if}
+              {#if configImportResult}<p role="status" class="text-sm text-lime-100">{configImportResult}</p>{/if}
+            </form>
+          </section>
           </aside>
         </section>
       {:else if activeTab === "easy"}
@@ -3288,7 +3478,7 @@
                 <p>
                   <span class="font-semibold text-white/80">{commandForm.commandKind}</span>
                   opens a local Linux terminal titled <code class="rounded bg-black/30 px-1 text-teal-100">team:box</code>.
-                  CFC-ImpUI hands off the shell and does not capture its output.
+                  CFCBench hands off the shell and does not capture its output.
                 </p>
                 <p>
                   <span class="font-semibold text-white/80">Kerberos</span>
@@ -3601,6 +3791,8 @@
             </div>
           </div>
         </section>
+      {:else if activeTab === "linux"}
+        <LinuxTools {teams} />
       {:else if activeTab === "notes"}
         <section class="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
           <div class="rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
@@ -3665,6 +3857,7 @@
           <div class="min-w-0 rounded-md border border-white/10 bg-[#0d1316]/90 p-5">
             <Radar class="h-6 w-6 text-teal-100" />
             <h2 class="mt-4 text-xl font-semibold text-white">Network Status</h2>
+            <p class="mt-2 text-sm text-white/60">Common Linux and Windows TCP services. Requires nmap.</p>
 
             <label class="mt-5 block">
               <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">Team</span>
@@ -3708,6 +3901,10 @@
                 <Save class="mr-2 h-4 w-4" />
                 {networkConfigSaving ? "Saving..." : "Save polling"}
               </Button>
+              <Button type="button" disabled={networkConfigLoading || networkConfigSaving}
+                class="border border-rose-200/30 bg-rose-200/10 text-rose-100 hover:bg-rose-200/20"
+                onclick={handleStopNetworkPolling}>Stop polling</Button>
+              <p class="text-xs text-white/50">Stop cancels background scans for all teams. Manual scans remain available.</p>
               {#if networkConfigError}
                 <p class="text-sm text-rose-100">{networkConfigError}</p>
               {/if}
@@ -3727,7 +3924,7 @@
           <div class="min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-5">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Open tracked ports</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200/60">Open TCP ports</p>
                 <h2 class="mt-2 text-xl font-semibold text-white">{selectedNetworkTeam || "No team selected"}</h2>
                 <p class="mt-2 text-sm text-white/50">
                   {networkOpenPortCount} open ports / last scan {networkStatus?.lastScannedAt || "not scanned yet"}
@@ -4301,9 +4498,5 @@
       </div>
     {/if}
 
-    <footer class="flex flex-col gap-2 border-t border-white/10 py-4 text-xs text-white/40 sm:flex-row sm:items-center sm:justify-between">
-      <span class="flex items-center gap-2"><CircleDot class="h-3 w-3 text-teal-200" /> Static tab workspace</span>
-      <span class="flex items-center gap-2"><Activity class="h-3 w-3 text-lime-200" /> Server expected on localhost:8765</span>
-    </footer>
   </div>
 </div>

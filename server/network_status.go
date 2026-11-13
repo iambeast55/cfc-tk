@@ -13,8 +13,28 @@ import (
 	"time"
 )
 
-var trackedWindowsPorts = []int{135, 139, 389, 445, 3389, 5985}
+// Scan the same service set for either OS; services are not OS-exclusive.
+var trackedPorts = []int{
+	21, 22, 25, 53, 80, 88, 110, 111, 135, 139, 143, 389, 443, 445,
+	464, 465, 587, 636, 993, 995, 1433, 2049, 3268, 3269, 3306,
+	3389, 5432, 5900, 5985, 5986, 6379, 8000, 8080, 8443, 9200, 27017,
+}
 var networkScanMu sync.Mutex
+var pollingMu sync.Mutex
+var pollingCancel context.CancelFunc
+var pollingWake = make(chan struct{}, 1)
+
+func resetNetworkPolling() {
+	pollingMu.Lock()
+	if pollingCancel != nil {
+		pollingCancel()
+	}
+	pollingMu.Unlock()
+	select {
+	case pollingWake <- struct{}{}:
+	default:
+	}
+}
 
 type nmapRun struct {
 	Hosts []nmapHost `xml:"host"`
@@ -44,15 +64,15 @@ type nmapService struct {
 }
 
 func trackedPortList() string {
-	parts := make([]string, 0, len(trackedWindowsPorts))
-	for _, port := range trackedWindowsPorts {
+	parts := make([]string, 0, len(trackedPorts))
+	for _, port := range trackedPorts {
 		parts = append(parts, strconv.Itoa(port))
 	}
 	return strings.Join(parts, ",")
 }
 
-func isTrackedWindowsPort(port int) bool {
-	for _, tracked := range trackedWindowsPorts {
+func isTrackedPort(port int) bool {
+	for _, tracked := range trackedPorts {
 		if port == tracked {
 			return true
 		}
@@ -61,8 +81,15 @@ func isTrackedWindowsPort(port int) bool {
 }
 
 func ScanTeamOpenPorts(teamName string) (*TeamNetworkStatus, error) {
+	return scanTeamOpenPorts(context.Background(), teamName)
+}
+
+func scanTeamOpenPorts(ctx context.Context, teamName string) (*TeamNetworkStatus, error) {
 	networkScanMu.Lock()
 	defer networkScanMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if _, err := GetTeamByName(teamName); err != nil {
 		return nil, err
@@ -80,8 +107,11 @@ func ScanTeamOpenPorts(teamName string) (*TeamNetworkStatus, error) {
 		return GetTeamNetworkStatus(teamName)
 	}
 
-	ports, err := runNmapOpenPortScan(targets)
+	ports, err := runNmapOpenPortScan(ctx, targets)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		scanErr := err.Error()
 		if updateErr := UpdateNetworkScanError(teamName, scanErr); updateErr != nil {
 			return nil, updateErr
@@ -94,6 +124,9 @@ func ScanTeamOpenPorts(teamName string) (*TeamNetworkStatus, error) {
 		return status, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := ReplaceTargetOpenPorts(teamName, targets, ports, ""); err != nil {
 		return nil, err
 	}
@@ -101,7 +134,7 @@ func ScanTeamOpenPorts(teamName string) (*TeamNetworkStatus, error) {
 	return GetTeamNetworkStatus(teamName)
 }
 
-func runNmapOpenPortScan(targets []Target) ([]OpenPort, error) {
+func runNmapOpenPortScan(parent context.Context, targets []Target) ([]OpenPort, error) {
 	args := []string{"-Pn", "-p", trackedPortList(), "--open", "-oX", "-"}
 	targetsByIP := map[string]Target{}
 	for _, target := range targets {
@@ -117,7 +150,7 @@ func runNmapOpenPortScan(targets []Target) ([]OpenPort, error) {
 		return nil, ErrNoNetworkTargets
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "nmap", args...)
@@ -162,7 +195,7 @@ func parseNmapOpenPorts(output []byte, targetsByIP map[string]Target) ([]OpenPor
 				continue
 			}
 			portID, err := strconv.Atoi(port.PortID)
-			if err != nil || !isTrackedWindowsPort(portID) {
+			if err != nil || !isTrackedPort(portID) {
 				continue
 			}
 			ports = append(ports, OpenPort{
@@ -181,8 +214,13 @@ func parseNmapOpenPorts(output []byte, targetsByIP map[string]Target) ([]OpenPor
 func StartNetworkStatusPoller() {
 	go func() {
 		for {
+			ctx, cancel := context.WithCancel(context.Background())
+			pollingMu.Lock()
+			pollingCancel = cancel
+			pollingMu.Unlock()
 			config, err := GetNetworkPollingConfig()
 			if err != nil {
+				cancel()
 				log.Printf("network status poller config error: %v", err)
 				time.Sleep(time.Minute)
 				continue
@@ -194,15 +232,20 @@ func StartNetworkStatusPoller() {
 			}
 
 			if config.Enabled {
-				pollAllTeamsOnce()
+				pollAllTeamsOnce(ctx)
 			}
-
-			time.Sleep(interval)
+			cancel()
+			timer := time.NewTimer(interval)
+			select {
+			case <-timer.C:
+			case <-pollingWake:
+			}
+			timer.Stop()
 		}
 	}()
 }
 
-func pollAllTeamsOnce() {
+func pollAllTeamsOnce(ctx context.Context) {
 	teams, err := GetAllTeams()
 	if err != nil {
 		log.Printf("network status poller team load error: %v", err)
@@ -210,7 +253,10 @@ func pollAllTeamsOnce() {
 	}
 
 	for _, team := range teams {
-		if _, err := ScanTeamOpenPorts(team.Name); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		if _, err := scanTeamOpenPorts(ctx, team.Name); err != nil && ctx.Err() == nil {
 			log.Printf("network status scan failed for %s: %v", team.Name, err)
 		}
 	}

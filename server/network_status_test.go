@@ -17,6 +17,10 @@ func TestParseNmapOpenPortsKeepsOnlyTrackedOpenPorts(t *testing.T) {
       <port protocol="tcp" portid="3389"><state state="open"/><service name="ms-wbt-server"/></port>
       <port protocol="tcp" portid="5985"><state state="closed"/><service name="wsman"/></port>
       <port protocol="tcp" portid="22"><state state="open"/><service name="ssh"/></port>
+      <port protocol="tcp" portid="443"><state state="open"/><service name="https"/></port>
+      <port protocol="tcp" portid="5986"><state state="open"/><service name="wsmans"/></port>
+      <port protocol="tcp" portid="2049"><state state="filtered"/><service name="nfs"/></port>
+      <port protocol="tcp" portid="65000"><state state="open"/></port>
     </ports>
   </host>
 </nmaprun>`)
@@ -25,14 +29,34 @@ func TestParseNmapOpenPortsKeepsOnlyTrackedOpenPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse nmap output: %v", err)
 	}
-	if len(ports) != 2 {
-		t.Fatalf("expected 2 tracked open ports, got %d: %+v", len(ports), ports)
+	if len(ports) != 5 {
+		t.Fatalf("expected 5 tracked open ports, got %d: %+v", len(ports), ports)
 	}
 	if ports[0].Port != 445 || ports[0].Service != "microsoft-ds" {
 		t.Fatalf("unexpected first port: %+v", ports[0])
 	}
 	if ports[1].Port != 3389 || ports[1].Service != "ms-wbt-server" {
 		t.Fatalf("unexpected second port: %+v", ports[1])
+	}
+	for index, expected := range []int{22, 443, 5986} {
+		if ports[index+2].Port != expected {
+			t.Fatalf("expected port %d, got %+v", expected, ports[index+2])
+		}
+	}
+}
+
+func TestTrackedPortListIncludesCrossPlatformServices(t *testing.T) {
+	for _, port := range []int{22, 80, 443, 445, 2049, 3389, 5432, 5985, 5986, 8080} {
+		if !isTrackedPort(port) {
+			t.Errorf("missing common TCP port %d", port)
+		}
+	}
+	seen := map[int]bool{}
+	for _, port := range trackedPorts {
+		if seen[port] || port < 1 || port > 65535 {
+			t.Fatalf("invalid or duplicate port %d", port)
+		}
+		seen[port] = true
 	}
 }
 

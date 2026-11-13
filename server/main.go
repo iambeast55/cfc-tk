@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -28,6 +29,8 @@ func main() {
 	})
 
 	// Team endpoints
+	router.HandleFunc("/api/config/import", importWorkspaceConfig).Methods("POST")
+	router.HandleFunc("/api/teams/{name}/linux/launch", launchLinuxConnection).Methods("POST")
 	router.HandleFunc("/api/teams", getTeams).Methods("GET")
 	router.HandleFunc("/api/teams", createTeam).Methods("POST")
 	router.HandleFunc("/api/teams/{name}", getTeam).Methods("GET")
@@ -49,11 +52,13 @@ func main() {
 	router.HandleFunc("/api/teams/{name}/kerberos-caches/run", runKerberosTicket).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/domains", getDomains).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/domains", createDomain).Methods("POST")
+	router.HandleFunc("/api/teams/{name}/domains/{id}", deleteDomain).Methods("DELETE")
 	router.HandleFunc("/api/teams/{name}/targets", getTargets).Methods("GET")
 	router.HandleFunc("/api/teams/{name}/targets", createTarget).Methods("POST")
 	router.HandleFunc("/api/teams/{name}/targets/{id}", deleteTarget).Methods("DELETE")
 	router.HandleFunc("/api/network-status/config", getNetworkPollingConfig).Methods("GET")
 	router.HandleFunc("/api/network-status/config", saveNetworkPollingConfig).Methods("PUT")
+	router.HandleFunc("/api/network-status/stop", stopNetworkPolling).Methods("POST")
 
 	// Health check
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +110,11 @@ func (lw *loggingResponseWriter) Write(b []byte) (int, error) {
 
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/linux/launch") {
+			// SSH requests can contain passwords; never record their bodies.
+			next.ServeHTTP(w, r)
+			return
+		}
 		var reqBody string
 		if r.Body != nil {
 			bodyBytes, _ := io.ReadAll(r.Body)

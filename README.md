@@ -1,6 +1,6 @@
-# CFC-ImpUI
+# CFCBench
 
-CFC-ImpUI is a UI driven tool for Impacket based commands, specifically built for cyber competitions. The idea being to give a way to handle multiple teams at once, and hopefully in a more organized single point manner.
+CFCBench is a UI driven tool for Impacket based commands, specifically built for cyber competitions. The idea being to give a way to handle multiple teams at once, and hopefully in a more organized single point manner.
 
 ## Features
 
@@ -13,12 +13,15 @@ CFC-ImpUI is a UI driven tool for Impacket based commands, specifically built fo
 - Run quick remote tasks with `wmiexec` or `psexec`
 - Save notes per team
 - Do simple network status checks and port scans
+- Open SSH terminals for Linux targets with password or private-key authentication
+- Upload and download individual files with SCP
+- Stop background network polling immediately from Network
 
 ## Requirements
 
 At a minimum:
 
-- Node.js 20+
+- Node.js 22+
 - npm
 - Go 1.24+
 - Python 3
@@ -27,7 +30,25 @@ At a minimum:
 
 ## Installation
 
+For a Linux deployment archive, run `python scripts/package_linux.py`.
+The archive and SHA-256 checksum are written to `dist/`. Extract the archive on
+Linux, then run `./install.sh` and `./run.sh`. See `deploy/linux/README.md` for
+dependencies and deployment details. Local databases and caches are excluded.
+
 Clone the repo, then install the UI and server dependencies.
+
+```sh
+git clone https://github.com/iambeast55/cfc-tk.git cfcbench
+cd cfcbench
+./cfcbench
+```
+
+The launcher installs Node dependencies, builds both components, and starts
+the app. For SSH/SCP on Kali, install `openssh-client` and `sshpass`; interactive
+terminals require starting CFCBench inside your graphical desktop session.
+Network scans require `nmap`.
+
+To install dependencies separately:
 
 ```sh
 npm install
@@ -43,7 +64,7 @@ cd ..
 From the project root:
 
 ```sh
-./ccfc-impui
+./cfcbench
 ```
 
 - install Node packages if needed
@@ -88,6 +109,17 @@ npm run server:build
 
 ## Data storage
 
+### Config import
+
+On Main, use Import config to upload a JSON file (up to 2 MB). Download the
+example there, or start from `static/config-example.json`. The format uses
+`version: 1` and a `teams` array; each team has `name`, `subnetId`, optional
+`domains` (names), and `targets` with `hostname`, `ip`, `os` (windows/linux),
+and optional `domain`. Omit domain for standalone hosts. Domain names referenced
+by targets are created automatically. Exact existing records are skipped;
+conflicts or invalid entries cancel the entire import. Credentials and command
+execution settings are not imported.
+
 Local data is stored in:
 
 ```text
@@ -101,12 +133,12 @@ Kerberos cache files and generated artifacts stay on disk wherever you choose to
 ## Project layout
 
 ```text
-cfc-impui/
+cfcbench/
 |-- src/       # Svelte UI
 |-- static/    # Static assets
 |-- server/    # Go API, SQLite logic, command runners
 |-- scripts/   # Dev helpers
-`-- ccfc-impui    # Simple launcher script
+`-- cfcbench    # Simple launcher script
 ```
 
 ## Screenshots
